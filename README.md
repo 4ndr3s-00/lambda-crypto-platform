@@ -168,13 +168,29 @@ make up
 make ps
 ```
 
-### 5. (Opcional) Levantar con LLM local Qwen2.5 (Ollama)
+### 5. (Opcional) Escalar el clúster Spark a varios workers
+Por defecto la plataforma levanta un único worker. Para añadir capacidad al
+clúster (útil para jobs batch pesados o en pruebas de carga) se puede escalar:
+```bash
+make scale-spark WORKERS=3
+```
+Cada worker adicional aporta `SPARK_WORKER_CORES` cores y `SPARK_WORKER_MEMORY`
+de memoria. Las Web UI de los workers quedan disponibles en los puertos
+`8081`, `8082`, `8083`... y el master muestra el total de cores del clúster en
+[http://localhost:8080](http://localhost:8080).
+
+Para volver a la configuración de un solo worker:
+```bash
+make scale-down
+```
+
+### 6. (Opcional) Levantar con LLM local Qwen2.5 (Ollama)
 Si tu equipo cuenta con al menos 12 GB de RAM o GPU dedicada:
 ```bash
 make up-all
 ```
 
-### 6. Ejecutar el Spark Batch (capa Batch)
+### 7. Ejecutar el Spark Batch (capa Batch)
 
 El job `spark/batch_historical.py` lee el histórico de MinIO vía S3A,
 normaliza y deduplica los eventos, y calcula las velas OHLCV y los retornos
@@ -208,7 +224,7 @@ Opciones disponibles:
 El mismo recálculo puede dispararse desde Airflow con el DAG
 `batch_recompute`, que por defecto procesa el día anterior a las 02:00 UTC.
 
-### 7. Ejecutar las pruebas
+### 8. Ejecutar las pruebas
 
 Las pruebas de la capa Spark usan una SparkSession local, por lo que no
 necesitan el clúster en marcha:
