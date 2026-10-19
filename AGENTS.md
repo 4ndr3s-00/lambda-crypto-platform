@@ -157,6 +157,14 @@ docker exec lambda-spark-master bash -c '
 
 ## 3. Cómo levantar el entorno
 
+> **Rama correcta:** `git clone` deja en `main`, que **no contiene este
+> trabajo**. Después de clonar, haz siempre:
+>
+> ```bash
+> git checkout develop && git pull origin develop
+> # (si el PR #37 aún no se aceptó, usa: git checkout feature/spark-batch-ohlcv)
+> ```
+
 ```bash
 cp .env.example .env      # o: make env
 make up                   # levanta MinIO, Kafka, Postgres, Spark, Airflow y API
