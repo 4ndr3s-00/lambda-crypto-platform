@@ -56,6 +56,8 @@ de Aceptación en BDD** y una **lista de tareas técnicas** marcadas con `- [ ]`
 ### Commits de la rama
 
 ```
+4b4608e docs: documentar las formas de retomar el trabajo con OpenCode
+e465cf6 docs: añadir AGENTS.md y comando /retomar para retomar el trabajo sin contexto
 89a0154 docs: documentar el escalado del clúster Spark en la guía de continuidad
 cea42bb feat(infra): permitir escalar el clúster Spark a varios workers
 0d65dcd docs: añadir guía de continuidad entre máquinas
@@ -67,6 +69,14 @@ cea42bb feat(infra): permitir escalar el clúster Spark a varios workers
 
 1. **Revisión del PR #37 y merge a `develop`.** Es el bloqueo principal: hasta
    que el PR se integre, el resto del equipo no ve el trabajo.
+   ⚠️ **Ojo:** las issues US-10, US-11, US-12 y US-21 están **cerradas**
+   (`state=completed`) desde 2026-10-19 18:38, pero el PR **sigue abierto y
+   sin mergear** (`develop` aún no contiene el código). Las cerró otra sesión
+   de IA con la misma cuenta, antes de que el PR se integrara. Si el equipo
+   da por hecho que el trabajo ya está en `develop`, se estaría trabajando
+   sobre código que no existe allí. **Verifica `git log origin/develop` antes de
+   asumir que el trabajo está integrado.**
+
 2. **Integrar `wip/infra-airflow-spark-client` en `develop`.** Ese cambio
    (PySpark 3.5.1 + jars Hadoop-AWS en la imagen de Airflow) **es requisito del
    DAG `batch_recompute`**: sin él, el DAG falla con `No module named 'py4j'`.
