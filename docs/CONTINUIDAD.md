@@ -99,6 +99,16 @@ docker exec lambda-spark-master bash -c '
 Las pruebas de Spark usan una SparkSession local, así que **no requieren el
 clúster en marcha**.
 
+### Escalar el clúster Spark
+
+```bash
+make scale-spark WORKERS=3   # 3 workers (6 cores, 3 GB)
+make scale-down              # vuelve a 1 worker
+```
+
+Las Web UI de los workers quedan en `http://localhost:8081`, `:8082` y `:8083`,
+y el master refleja el total del clúster en `http://localhost:8080`.
+
 ---
 
 ## Decisiones de diseño que conviene no re-litigar
