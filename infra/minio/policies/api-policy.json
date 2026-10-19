@@ -20,7 +20,9 @@
       ],
       "Resource": [
         "arn:aws:s3:::market-lake/batch-results/*",
-        "arn:aws:s3:::market-lake/reference/*"
+        "arn:aws:s3:::market-lake/batch-results",
+        "arn:aws:s3:::market-lake/reference/*",
+        "arn:aws:s3:::market-lake/reference"
       ]
     }
   ]

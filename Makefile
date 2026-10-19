@@ -3,9 +3,14 @@
 # ==============================================================================
 
 COMPOSE_FILE = infra/docker-compose.yml
+COMPOSE_SCALE_FILE = infra/docker-compose.scale.yml
 ENV_FILE = .env
 
-.PHONY: help env up down restart ps logs logs-api logs-kafka logs-spark logs-airflow clean
+# Número de workers Spark del clúster. Cada worker aporta
+# SPARK_WORKER_CORES cores y SPARK_WORKER_MEMORY de memoria.
+WORKERS ?= 3
+
+.PHONY: help env up down restart ps logs logs-api logs-kafka logs-spark logs-airflow clean scale-spark scale-down
 
 help:
 	@echo "Comandos disponibles:"
@@ -16,6 +21,7 @@ help:
 	@echo "  make restart       Reinicia todos los servicios"
 	@echo "  make ps            Muestra el estado de los contenedores"
 	@echo "  make logs          Muestra logs combinados en tiempo real"
+	@echo "  make scale-spark   Escala el clúster Spark a WORKERS workers (por defecto 3)"
 	@echo "  make clean         Detiene y elimina volúmenes y redes creadas"
 
 env:
@@ -54,6 +60,19 @@ logs-spark:
 
 logs-airflow:
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) logs -f airflow
+
+# Escala el clúster Spark añadiendo workers al master ya en marcha.
+# El override elimina el `container_name` fijo y publica un rango de puertos
+# para que cada réplica tenga su propia Web UI.
+scale-spark:
+	docker compose -f $(COMPOSE_FILE) -f $(COMPOSE_SCALE_FILE) --env-file $(ENV_FILE) \
+		up -d --scale spark-worker=$(WORKERS) spark-worker
+	@echo "Clúster Spark escalado a $(WORKERS) workers. Verifica en http://localhost:$(SPARK_WORKER_WEBUI_PORT)"
+
+# Vuelve a un único worker (el comportamiento por defecto de `make up`).
+scale-down:
+	docker compose -f $(COMPOSE_FILE) -f $(COMPOSE_SCALE_FILE) --env-file $(ENV_FILE) \
+		up -d --scale spark-worker=1 spark-worker
 
 clean:
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) down -v --remove-orphans

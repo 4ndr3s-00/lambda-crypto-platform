@@ -62,6 +62,10 @@ La arquitectura Medallion (Bronze/Silver/Gold) es un patrón alternativo centrad
 2. **Organización funcional en MinIO**: Almacenamiento organizado por propósito funcional (`historical/`, `batch-results/`, `reference/`, `checkpoints/`, `quarantine/`), no por niveles Bronze/Silver/Gold.
 3. **Reconciliación en Serving**: La capa de servicio resuelve colisiones y solapamientos con base en marcas temporales de evento (*event-time*), no por hora de llegada.
 
+> **¿Retomas el trabajo en otra máquina?** Consulta la
+> [guía de continuidad](docs/CONTINUIDAD.md): explica qué se conserva, qué se
+> reconstruye y los pasos exactos para dejar la plataforma operativa de nuevo.
+
 ---
 
 ## 2. Estructura del Repositorio
@@ -86,9 +90,11 @@ lambda-crypto-platform/
 │   └── contracts/                   # Esquema canónico de validación de eventos
 │       └── market_event.schema.json
 ├── spark/                           # Lógica de procesamiento distribuido
-│   ├── .gitkeep                     # Jobs de Spark Batch, Structured Streaming y Reconciliación
+│   ├── spark_session.py             # Sesión Spark con cliente S3A (Hadoop-AWS)
+│   ├── batch_historical.py          # Spark Batch: normalización, dedup, OHLCV y retornos
+│   └── serving_reconcile.py         # Reconciliación Lambda entre Speed y Batch
 ├── dags/                            # Orquestación de flujos batch con Apache Airflow
-│   └── .gitkeep                     # DAGs de ingesta, recálculo, DLQ y calidad
+│   └── batch_recompute.py           # DAG de recálculo batch con Spark (US-15)
 ├── metadata/                        # Catálogo (OpenMetadata), Linaje (OpenLineage) y Gobierno (Atlas)
 │   └── README.md
 ├── api/                             # Serving Layer (FastAPI)
@@ -100,7 +106,11 @@ lambda-crypto-platform/
 ├── tests/                           # Batería de pruebas
 │   ├── unit/                        # Pruebas unitarias de transformaciones y contratos
 │   ├── integration/                 # Pruebas de integración MinIO/Kafka/Postgres
-│   └── load/                        # Generador sintético de estrés (millones de eventos)
+│   ├── load/                        # Generador sintético de estrés (millones de eventos)
+│   └── requirements.txt             # Dependencias de las pruebas
+├── docs/                            # Documentación operativa
+│   └── CONTINUIDAD.md               # Guía de traspaso entre máquinas
+├── AGENTS.md                        # Contexto del proyecto para asistentes de IA
 ├── Makefile                         # Comandos rápidos de operación (make up, make down)
 ├── .env.example                     # Variables de entorno documentadas
 ├── .gitignore                       # Exclusiones de secretos, datos y temporales
@@ -159,10 +169,71 @@ make up
 make ps
 ```
 
-### 5. (Opcional) Levantar con LLM local Qwen2.5 (Ollama)
+### 5. (Opcional) Escalar el clúster Spark a varios workers
+Por defecto la plataforma levanta un único worker. Para añadir capacidad al
+clúster (útil para jobs batch pesados o en pruebas de carga) se puede escalar:
+```bash
+make scale-spark WORKERS=3
+```
+Cada worker adicional aporta `SPARK_WORKER_CORES` cores y `SPARK_WORKER_MEMORY`
+de memoria. Las Web UI de los workers quedan disponibles en los puertos
+`8081`, `8082`, `8083`... y el master muestra el total de cores del clúster en
+[http://localhost:8080](http://localhost:8080).
+
+Para volver a la configuración de un solo worker:
+```bash
+make scale-down
+```
+
+### 6. (Opcional) Levantar con LLM local Qwen2.5 (Ollama)
 Si tu equipo cuenta con al menos 12 GB de RAM o GPU dedicada:
 ```bash
 make up-all
+```
+
+### 7. Ejecutar el Spark Batch (capa Batch)
+
+El job `spark/batch_historical.py` lee el histórico de MinIO vía S3A,
+normaliza y deduplica los eventos, y calcula las velas OHLCV y los retornos
+escribiéndolos de forma idempotente en `s3://market-lake/batch-results/`.
+
+```bash
+# Recálculo de un mes para dos símbolos
+docker exec lambda-spark-master bash -c '
+  cd /opt/bitnami/spark/jobs && spark-submit \
+    --master spark://spark-master:7077 \
+    --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 \
+    --conf spark.hadoop.fs.s3a.path.style.access=true \
+    --conf spark.hadoop.fs.s3a.connection.ssl.enabled=false \
+    --conf spark.hadoop.fs.s3a.aws.credentials.provider=org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider \
+    batch_historical.py \
+    --start-date 2026-09-01 --end-date 2026-09-30 \
+    --symbols BTCUSDT,ETHUSDT \
+    --intervals 1m,5m,1h,1d'
+```
+
+Opciones disponibles:
+
+| Flag | Descripción |
+| :--- | :--- |
+| `--start-date` / `--end-date` | Rango a procesar (inclusive). Ambos son obligatorios. |
+| `--symbols` | Lista de símbolos separados por coma. Si se omite, se procesan todos. |
+| `--intervals` | Granularidades: `1m`, `5m`, `1h`, `1d` (por defecto, todas). |
+| `--metrics` | Métricas a producir: `ohlcv`, `returns` (por defecto, ambas). |
+| `--quarantine-invalid` | Envía los eventos que violan el contrato a la DLQ. |
+
+El mismo recálculo puede dispararse desde Airflow con el DAG
+`batch_recompute`, que por defecto procesa el día anterior a las 02:00 UTC.
+
+### 8. Ejecutar las pruebas
+
+Las pruebas de la capa Spark usan una SparkSession local, por lo que no
+necesitan el clúster en marcha:
+
+```bash
+docker exec lambda-spark-master bash -c '
+  pip install --no-cache-dir pytest==8.3.4 && \
+  cd /opt/bitnami/spark/jobs && python -m pytest . -v'
 ```
 
 ---
