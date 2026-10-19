@@ -62,6 +62,10 @@ La arquitectura Medallion (Bronze/Silver/Gold) es un patrón alternativo centrad
 2. **Organización funcional en MinIO**: Almacenamiento organizado por propósito funcional (`historical/`, `batch-results/`, `reference/`, `checkpoints/`, `quarantine/`), no por niveles Bronze/Silver/Gold.
 3. **Reconciliación en Serving**: La capa de servicio resuelve colisiones y solapamientos con base en marcas temporales de evento (*event-time*), no por hora de llegada.
 
+> **¿Retomas el trabajo en otra máquina?** Consulta la
+> [guía de continuidad](docs/CONTINUIDAD.md): explica qué se conserva, qué se
+> reconstruye y los pasos exactos para dejar la plataforma operativa de nuevo.
+
 ---
 
 ## 2. Estructura del Repositorio
@@ -102,7 +106,10 @@ lambda-crypto-platform/
 ├── tests/                           # Batería de pruebas
 │   ├── unit/                        # Pruebas unitarias de transformaciones y contratos
 │   ├── integration/                 # Pruebas de integración MinIO/Kafka/Postgres
-│   └── load/                        # Generador sintético de estrés (millones de eventos)
+│   ├── load/                        # Generador sintético de estrés (millones de eventos)
+│   └── requirements.txt             # Dependencias de las pruebas
+├── docs/                            # Documentación operativa
+│   └── CONTINUIDAD.md               # Guía de traspaso entre máquinas
 ├── Makefile                         # Comandos rápidos de operación (make up, make down)
 ├── .env.example                     # Variables de entorno documentadas
 ├── .gitignore                       # Exclusiones de secretos, datos y temporales
