@@ -67,27 +67,69 @@ cea42bb feat(infra): permitir escalar el clúster Spark a varios workers
 
 ### Pendiente (prioridad en este orden)
 
-1. **Revisión del PR #37 y merge a `develop`.** Es el bloqueo principal: hasta
-   que el PR se integre, el resto del equipo no ve el trabajo.
+1. **Conseguir la revisión del PR #37.** El PR está **abierto y sin mergear**,
+   esperando que los compañeros del equipo lo verifiquen (aún no hay revisiones
+   solicitadas ni comentarios en el código). Hasta que se apruebe y se mergee,
+   `develop` no contiene este trabajo. **No lo mergees tú mismo salvo que te lo
+   pidan explícitamente**: el repositorio exige revisión por pares (ver §3 del
+   README).
    ⚠️ **Ojo:** las issues US-10, US-11, US-12 y US-21 están **cerradas**
    (`state=completed`) desde 2026-10-19 18:38, pero el PR **sigue abierto y
-   sin mergear** (`develop` aún no contiene el código). Las cerró otra sesión
-   de IA con la misma cuenta, antes de que el PR se integrara. Si el equipo
-   da por hecho que el trabajo ya está en `develop`, se estaría trabajando
-   sobre código que no existe allí. **Verifica `git log origin/develop` antes de
-   asumir que el trabajo está integrado.**
+   sin mergear**. Las cerró otra sesión de IA con la misma cuenta, antes de que
+   el PR se revisara. Una issue cerrada dice "trabajo terminado y aceptado", y
+   hoy eso todavía no es cierto. Si alguien del equipo se guía por el estado de
+   las issues, va a trabajar sobre código que no existe en `develop`.
+   **Verifica `git log origin/develop` antes de asumir que el trabajo está
+   integrado.**
 
-2. **Integrar `wip/infra-airflow-spark-client` en `develop`.** Ese cambio
+2. **Responder a la revisión.** Cuando lleguen los comentarios del código,
+   iterar sobre la misma rama `feature/spark-batch-ohlcv` y hacer *push* de los
+   cambios: el PR se actualiza solo. No hace falta abrir un PR nuevo.
+
+3. **Integrar `wip/infra-airflow-spark-client` en `develop`.** Ese cambio
    (PySpark 3.5.1 + jars Hadoop-AWS en la imagen de Airflow) **es requisito del
    DAG `batch_recompute`**: sin él, el DAG falla con `No module named 'py4j'`.
    Es trabajo de otra persona, preservado en esa rama para que no se perdiera.
-3. **Implementar la ruta Speed** (US-18/19/20, de Diego). Es el único hueco
+   ⚠️ Ojo: `wip/infra-airflow-spark-client` contiene **cambios de
+   `infra/docker-compose.yml`**, y este PR **también toca ese archivo** (el
+   override `docker-compose.scale.yml` es un archivo nuevo, pero el `Makefile`
+   sí cambió). Al integrar ambas cosas puede haber conflictos menores.
+
+4. **Implementar la ruta Speed** (US-18/19/20, de Diego). Es el único hueco
    real que queda: US-21 define y prueba la reconciliación, pero hoy la ruta
    Speed no existe, así que la reconciliación solo se ejercita con datasets
    sintéticos en las pruebas.
-4. **Marcar las casillas de las tareas técnicas** en US-10, US-11, US-12 y US-21
+
+5. **Marcar las casillas de las tareas técnicas** en US-10, US-11, US-12 y US-21
    (ya se dejó un comentario de avance en cada una, pero las casillas siguen
    sin marcar).
+
+### Checklist para quien revise el PR #37
+
+Para que la revisión sea rápida, estos son los puntos donde más fácil es
+encontrar un fallo. En su mayoría ya están cubiertos por tests, pero conviene
+confirmarlos:
+
+| # | Qué mirar | Dónde |
+| :--- | :--- | :--- |
+| 1 | ¿La deduplicación es la que pide el criterio? (`event_id` **y** clave compuesta) | `deduplicate_events()` |
+| 2 | ¿La escritura sobrescribe **solo** la partición de fecha afectada? | `write_idempotent()` |
+| 3 | ¿La reconciliación puede devolver la misma vela dos veces? | `reconcile()` / `reconcile_deduplicated()` |
+| 4 | ¿El `cutoff` se resuelve bien cuando la ruta Batch está vacía? | `resolve_cutoff()` |
+| 5 | ¿La CLI valida rangos y granularidades inválidos? | `parse_args()` |
+| 6 | ¿El fix de IAM amplía permisos más de lo necesario? | `infra/minio/policies/` |
+| 7 | ¿El override de escalado rompe el flujo por defecto (`make up`)? | `infra/docker-compose.scale.yml` |
+
+**Cómo reproducir la verificación localmente:**
+
+```bash
+# Tests (44 en total)
+docker exec lambda-spark-master bash -c '
+  pip install --no-cache-dir -r /opt/bitnami/spark/jobs/tests/requirements.txt &&
+  cd /opt/bitnami/spark/jobs && python -m pytest tests -v'
+
+# Job real contra MinIO (ver §4)
+```
 
 ---
 
