@@ -110,6 +110,7 @@ lambda-crypto-platform/
 │   └── requirements.txt             # Dependencias de las pruebas
 ├── docs/                            # Documentación operativa
 │   └── CONTINUIDAD.md               # Guía de traspaso entre máquinas
+├── AGENTS.md                        # Contexto del proyecto para asistentes de IA
 ├── Makefile                         # Comandos rápidos de operación (make up, make down)
 ├── .env.example                     # Variables de entorno documentadas
 ├── .gitignore                       # Exclusiones de secretos, datos y temporales

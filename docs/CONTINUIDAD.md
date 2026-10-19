@@ -26,6 +26,33 @@ está en GitHub.
 
 ## Retomar en una máquina nueva
 
+### Opción A — con OpenCode (recomendada)
+
+`AGENTS.md` está en la raíz del repositorio y **OpenCode lo carga
+automáticamente** al abrir el proyecto. Es decir: no hace falta explicarle
+nada a la sesión, ya sabe en qué punto quedó todo.
+
+```bash
+git clone https://github.com/4ndr3s-00/lambda-crypto-platform.git
+cd lambda-crypto-platform
+git checkout feature/spark-batch-ohlcv
+opencode
+```
+
+En la sesión, escribe `/retomar` para que el agente inyecte el estado real de
+git, los PR abiertos y el estado de los issues, y te proponga los siguientes
+pasos.
+
+### Opción B — sin clonar (solo para consultar el estado)
+
+Si únicamente quieres leer el estado y no vas a trabajar todavía:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/4ndr3s-00/lambda-crypto-platform/feature/spark-batch-ohlcv/AGENTS.md
+```
+
+### Opción C — a mano
+
 ```bash
 # 1. Clonar el repositorio
 git clone https://github.com/4ndr3s-00/lambda-crypto-platform.git
