@@ -136,6 +136,10 @@ services:
       - AWS_SECRET_ACCESS_KEY=${SPARK_MINIO_PASSWORD:-spark_secure_lake_pass123}
       - AWS_REGION=us-east-1
       - S3_ENDPOINT=http://minio:9000
+      # El worker de Python solo encuentra py4j dentro del venv de Bitnami.
+      # Sin estas variables, cualquier job PySpark falla con "No module named 'py4j'".
+      - PYSPARK_PYTHON=/opt/bitnami/spark/venv/bin/python
+      - PYSPARK_DRIVER_PYTHON=/opt/bitnami/spark/venv/bin/python
     ports:
       - "${SPARK_MASTER_PORT:-7077}:7077"
       - "${SPARK_MASTER_WEBUI_PORT:-8080}:8080"
@@ -170,10 +174,15 @@ services:
       - AWS_SECRET_ACCESS_KEY=${SPARK_MINIO_PASSWORD:-spark_secure_lake_pass123}
       - AWS_REGION=us-east-1
       - S3_ENDPOINT=http://minio:9000
+      - PYSPARK_PYTHON=/opt/bitnami/spark/venv/bin/python
+      - PYSPARK_DRIVER_PYTHON=/opt/bitnami/spark/venv/bin/python
     ports:
       - "${SPARK_WORKER_WEBUI_PORT:-8081}:8081"
     volumes:
       - ../spark:/opt/bitnami/spark/jobs:ro
+      # Mismo path que en Airflow para que los jobs queden visibles en ambos
+      # contenedores (util para jobs Java/Scala en modo cluster).
+      - ../spark:/opt/airflow/spark:ro
     networks:
       - lambda-net
 
@@ -194,10 +203,19 @@ services:
       _AIRFLOW_WWW_USER_CREATE: "true"
       _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_USER:-admin}
       _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_PASSWORD:-admin}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_secure_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-market_platform}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopassword123}
+      AIRFLOW_MINIO_USER: ${AIRFLOW_MINIO_USER:-airflow_service}
+      AIRFLOW_MINIO_PASSWORD: ${AIRFLOW_MINIO_PASSWORD:-airflow_secure_lake_pass123}
+      AIRFLOW_CONN_MINIO_DEFAULT: aws://${AIRFLOW_MINIO_USER:-airflow_service}:${AIRFLOW_MINIO_PASSWORD:-airflow_secure_lake_pass123}@?endpoint_url=http%3A%2F%2Fminio%3A9000
     entrypoint:
       - /bin/bash
       - -c
       - |
+        set -e
         airflow db migrate
         airflow users create \
           --username "${AIRFLOW_USER:-admin}" \
@@ -206,6 +224,40 @@ services:
           --lastname User \
           --role Admin \
           --email "${AIRFLOW_EMAIL:-andres@local.dev}" || true
+
+        # --- Conexiones idempotentes de la plataforma (US-13) -------------------
+        airflow connections delete minio_default >/dev/null 2>&1 || true
+        airflow connections add minio_default \
+          --conn-type aws \
+          --conn-login "${AIRFLOW_MINIO_USER:-airflow_service}" \
+          --conn-password "${AIRFLOW_MINIO_PASSWORD:-airflow_secure_lake_pass123}" \
+          --conn-extra '{"endpoint_url":"http://minio:9000"}'
+
+        # El host debe traer el esquema completo: el provider de Spark 4.x
+        # construye el master como "<host>" y usa "deploy-mode" del extra.
+        airflow connections delete spark_default >/dev/null 2>&1 || true
+        airflow connections add spark_default \
+          --conn-type spark \
+          --conn-host "spark://spark-master:7077" \
+          --conn-extra '{"deploy-mode":"client"}'
+
+        airflow connections delete postgres_market >/dev/null 2>&1 || true
+        airflow connections add postgres_market \
+          --conn-type postgres \
+          --conn-host postgres \
+          --conn-port 5432 \
+          --conn-login "${POSTGRES_USER:-postgres}" \
+          --conn-password "${POSTGRES_PASSWORD:-postgres_secure_pass}" \
+          --conn-schema "${POSTGRES_DB:-market_platform}"
+
+        airflow connections delete kafka_default >/dev/null 2>&1 || true
+        airflow connections add kafka_default \
+          --conn-type generic \
+          --conn-host kafka \
+          --conn-port 9092 \
+          --conn-extra '{"bootstrap_servers":"kafka:9092"}'
+
+        echo "[Airflow Init] Conexiones minio_default, spark_default, postgres_market y kafka_default listas."
     networks:
       - lambda-net
 
