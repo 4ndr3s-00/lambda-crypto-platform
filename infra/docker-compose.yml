@@ -32,8 +32,15 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopassword123}
+      SPARK_MINIO_USER: ${SPARK_MINIO_USER:-spark_service}
+      SPARK_MINIO_PASSWORD: ${SPARK_MINIO_PASSWORD:-spark_secure_lake_pass123}
+      AIRFLOW_MINIO_USER: ${AIRFLOW_MINIO_USER:-airflow_service}
+      AIRFLOW_MINIO_PASSWORD: ${AIRFLOW_MINIO_PASSWORD:-airflow_secure_lake_pass123}
+      API_MINIO_USER: ${API_MINIO_USER:-api_service}
+      API_MINIO_PASSWORD: ${API_MINIO_PASSWORD:-api_secure_serving_pass123}
     volumes:
       - ./minio/init-buckets.sh:/init-buckets.sh:ro
+      - ./minio/policies:/policies:ro
     entrypoint: ["/usr/bin/bash", "/init-buckets.sh"]
     networks:
       - lambda-net
@@ -125,6 +132,10 @@ services:
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
       - SPARK_SSL_ENABLED=no
+      - AWS_ACCESS_KEY_ID=${SPARK_MINIO_USER:-spark_service}
+      - AWS_SECRET_ACCESS_KEY=${SPARK_MINIO_PASSWORD:-spark_secure_lake_pass123}
+      - AWS_REGION=us-east-1
+      - S3_ENDPOINT=http://minio:9000
     ports:
       - "${SPARK_MASTER_PORT:-7077}:7077"
       - "${SPARK_MASTER_WEBUI_PORT:-8080}:8080"
@@ -155,6 +166,10 @@ services:
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
       - SPARK_SSL_ENABLED=no
+      - AWS_ACCESS_KEY_ID=${SPARK_MINIO_USER:-spark_service}
+      - AWS_SECRET_ACCESS_KEY=${SPARK_MINIO_PASSWORD:-spark_secure_lake_pass123}
+      - AWS_REGION=us-east-1
+      - S3_ENDPOINT=http://minio:9000
     ports:
       - "${SPARK_WORKER_WEBUI_PORT:-8081}:8081"
     volumes:
@@ -210,9 +225,9 @@ services:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres_secure_pass}@postgres:5432/airflow
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "False"
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-miniopassword123}
-      AIRFLOW_CONN_MINIO_DEFAULT: aws://minioadmin:miniopassword123@?endpoint_url=http%3A%2F%2Fminio%3A9000
+      AWS_ACCESS_KEY_ID: ${AIRFLOW_MINIO_USER:-airflow_service}
+      AWS_SECRET_ACCESS_KEY: ${AIRFLOW_MINIO_PASSWORD:-airflow_secure_lake_pass123}
+      AIRFLOW_CONN_MINIO_DEFAULT: aws://${AIRFLOW_MINIO_USER:-airflow_service}:${AIRFLOW_MINIO_PASSWORD:-airflow_secure_lake_pass123}@?endpoint_url=http%3A%2F%2Fminio%3A9000
     ports:
       - "${AIRFLOW_WEBSERVER_PORT:-8085}:8080"
     volumes:
@@ -249,8 +264,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_secure_pass}
       POSTGRES_DB: ${POSTGRES_DB:-market_platform}
       MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-miniopassword123}
+      MINIO_ACCESS_KEY: ${API_MINIO_USER:-api_service}
+      MINIO_SECRET_KEY: ${API_MINIO_PASSWORD:-api_secure_serving_pass123}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b-instruct}
     ports:
