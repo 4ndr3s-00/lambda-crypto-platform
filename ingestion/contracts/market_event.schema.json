@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MarketEventContract",
+  "description": "Contrato formal de evento de mercado para la arquitectura Lambda (Plataforma de Datos Financieros y Criptomonedas)",
+  "type": "object",
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "description": "Identificador determinístico o UUID único del evento para deduplicación"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["binance_rest", "binance_ws", "coingecko_rest", "synthetic_generator", "csv_backfill"],
+      "description": "Identificador del conector / fuente de origen"
+    },
+    "exchange": {
+      "type": "string",
+      "description": "Nombre del exchange o proveedor de mercado"
+    },
+    "symbol": {
+      "type": "string",
+      "pattern": "^[A-Z0-9_-]+$",
+      "description": "Símbolo canónico normalizado (ej: BTCUSDT, ETHUSDT)"
+    },
+    "event_time": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Marca de tiempo de generación del evento en el exchange (UTC)"
+    },
+    "ingestion_time": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Marca de tiempo en que el conector procesó el evento (UTC)"
+    },
+    "price": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Precio unitario observado"
+    },
+    "quantity": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Volumen o cantidad transaccionada"
+    },
+    "trade_id": {
+      "type": ["string", "integer", "null"],
+      "description": "Identificador de trade originario en el exchange"
+    },
+    "interval": {
+      "type": ["string", "null"],
+      "enum": ["tick", "trade", "1m", "5m", "1h", "1d", null],
+      "description": "Granularidad temporal de la observación"
+    },
+    "schema_version": {
+      "type": "string",
+      "enum": ["2.0.0"],
+      "description": "Versión del contrato de datos"
+    }
+  },
+  "required": [
+    "event_id",
+    "source",
+    "exchange",
+    "symbol",
+    "event_time",
+    "ingestion_time",
+    "price",
+    "quantity",
+    "schema_version"
+  ],
+  "additionalProperties": false
+}

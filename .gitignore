@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+ENV/
+
+# Environment and Secrets
+.env
+*.env.local
+secrets/
+*.pem
+*.key
+*.crt
+
+# Spark & Hadoop
+derby.log
+metastore_db/
+checkpoint/
+checkpoints/
+.spark-staging/
+spark-warehouse/
+
+# Airflow
+airflow.cfg
+airflow.db
+airflow-webserver.pid
+logs/
+
+# MinIO / S3 Local Data & Mounts
+.minio.sys/
+minio-data/
+postgres-data/
+kafka-data/
+
+# Data & Test artifacts
+data/
+*.parquet
+*.csv.gz
+*.tar.gz
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Ollama local cache
+ollama-models/
