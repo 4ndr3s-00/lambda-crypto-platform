@@ -27,9 +27,8 @@ Retoma el trabajo de la capa Spark en este repositorio. Contexto completo en `AG
 revisión por parte de los compañeros del equipo**; no corresponde mergearlo sin
 que lo aprueben. Si ya hay comentarios de revisión, el trabajo es responderlos
 iterando sobre la misma rama y haciendo push (el PR se actualiza solo).
-Recuerda que US-10, US-11, US-12 y US-21 están cerradas en GitHub, pero el PR
-aún no está integrando `develop`: es un estado transitorio, no un error del
-código.
+Recuerda que US-10, US-11, US-12 y US-21 están **abiertas** a propósito: en
+este repositorio las issues se cierran cuando su PR se mergea.
 
 No rehagas trabajo ya hecho. No crees ramas nuevas sin avisar. Antes de proponer
 cambios, verifica el estado real con los comandos de arriba.

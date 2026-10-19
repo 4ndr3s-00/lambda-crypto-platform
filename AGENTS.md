@@ -73,14 +73,11 @@ cea42bb feat(infra): permitir escalar el clúster Spark a varios workers
    `develop` no contiene este trabajo. **No lo mergees tú mismo salvo que te lo
    pidan explícitamente**: el repositorio exige revisión por pares (ver §3 del
    README).
-   ⚠️ **Ojo:** las issues US-10, US-11, US-12 y US-21 están **cerradas**
-   (`state=completed`) desde 2026-10-19 18:38, pero el PR **sigue abierto y
-   sin mergear**. Las cerró otra sesión de IA con la misma cuenta, antes de que
-   el PR se revisara. Una issue cerrada dice "trabajo terminado y aceptado", y
-   hoy eso todavía no es cierto. Si alguien del equipo se guía por el estado de
-   las issues, va a trabajar sobre código que no existe en `develop`.
-   **Verifica `git log origin/develop` antes de asumir que el trabajo está
-   integrado.**
+   Las issues US-10, US-11, US-12 y US-21 **están abiertas**. Se habían
+   cerrado antes de tiempo (otra sesión de IA con la misma cuenta, sin que el
+   PR estuviera revisado), lo que rompía la convención del repositorio: aquí
+   la issue se cierra cuando su PR se mergea. Se reabrieron y se dejó el motivo
+   en cada una. **Si vuelve a pasar, reabrir y volver a avisar.**
 
 2. **Responder a la revisión.** Cuando lleguen los comentarios del código,
    iterar sobre la misma rama `feature/spark-batch-ohlcv` y hacer *push* de los
