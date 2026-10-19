@@ -23,7 +23,8 @@
         "s3:AbortMultipartUpload"
       ],
       "Resource": [
-        "arn:aws:s3:::market-lake/*"
+        "arn:aws:s3:::market-lake/*",
+        "arn:aws:s3:::market-lake"
       ]
     },
     {
@@ -33,7 +34,8 @@
         "s3:GetObject"
       ],
       "Resource": [
-        "arn:aws:s3:::market-quarantine/*"
+        "arn:aws:s3:::market-quarantine/*",
+        "arn:aws:s3:::market-quarantine"
       ]
     }
   ]

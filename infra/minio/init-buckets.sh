@@ -138,7 +138,8 @@ cat << 'EOF' > "${TMP_POLICIES_DIR}/spark-policy.json"
         "s3:AbortMultipartUpload"
       ],
       "Resource": [
-        "arn:aws:s3:::market-checkpoints/*"
+        "arn:aws:s3:::market-checkpoints/*",
+        "arn:aws:s3:::market-checkpoints"
       ]
     },
     {
@@ -151,7 +152,8 @@ cat << 'EOF' > "${TMP_POLICIES_DIR}/spark-policy.json"
         "s3:AbortMultipartUpload"
       ],
       "Resource": [
-        "arn:aws:s3:::market-lake/batch-results/*"
+        "arn:aws:s3:::market-lake/batch-results/*",
+        "arn:aws:s3:::market-lake/batch-results"
       ]
     },
     {
@@ -162,7 +164,9 @@ cat << 'EOF' > "${TMP_POLICIES_DIR}/spark-policy.json"
       ],
       "Resource": [
         "arn:aws:s3:::market-lake/historical/*",
-        "arn:aws:s3:::market-lake/reference/*"
+        "arn:aws:s3:::market-lake/historical",
+        "arn:aws:s3:::market-lake/reference/*",
+        "arn:aws:s3:::market-lake/reference"
       ]
     },
     {
@@ -173,7 +177,8 @@ cat << 'EOF' > "${TMP_POLICIES_DIR}/spark-policy.json"
         "s3:AbortMultipartUpload"
       ],
       "Resource": [
-        "arn:aws:s3:::market-quarantine/*"
+        "arn:aws:s3:::market-quarantine/*",
+        "arn:aws:s3:::market-quarantine"
       ]
     }
   ]
@@ -207,7 +212,8 @@ cat << 'EOF' > "${TMP_POLICIES_DIR}/airflow-policy.json"
         "s3:AbortMultipartUpload"
       ],
       "Resource": [
-        "arn:aws:s3:::market-lake/*"
+        "arn:aws:s3:::market-lake/*",
+        "arn:aws:s3:::market-lake"
       ]
     },
     {
@@ -217,7 +223,8 @@ cat << 'EOF' > "${TMP_POLICIES_DIR}/airflow-policy.json"
         "s3:GetObject"
       ],
       "Resource": [
-        "arn:aws:s3:::market-quarantine/*"
+        "arn:aws:s3:::market-quarantine/*",
+        "arn:aws:s3:::market-quarantine"
       ]
     }
   ]
@@ -248,7 +255,9 @@ cat << 'EOF' > "${TMP_POLICIES_DIR}/api-policy.json"
       ],
       "Resource": [
         "arn:aws:s3:::market-lake/batch-results/*",
-        "arn:aws:s3:::market-lake/reference/*"
+        "arn:aws:s3:::market-lake/batch-results",
+        "arn:aws:s3:::market-lake/reference/*",
+        "arn:aws:s3:::market-lake/reference"
       ]
     }
   ]

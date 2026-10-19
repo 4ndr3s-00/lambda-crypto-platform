@@ -24,7 +24,8 @@
         "s3:AbortMultipartUpload"
       ],
       "Resource": [
-        "arn:aws:s3:::market-checkpoints/*"
+        "arn:aws:s3:::market-checkpoints/*",
+        "arn:aws:s3:::market-checkpoints"
       ]
     },
     {
@@ -37,7 +38,8 @@
         "s3:AbortMultipartUpload"
       ],
       "Resource": [
-        "arn:aws:s3:::market-lake/batch-results/*"
+        "arn:aws:s3:::market-lake/batch-results/*",
+        "arn:aws:s3:::market-lake/batch-results"
       ]
     },
     {
@@ -48,7 +50,9 @@
       ],
       "Resource": [
         "arn:aws:s3:::market-lake/historical/*",
-        "arn:aws:s3:::market-lake/reference/*"
+        "arn:aws:s3:::market-lake/historical",
+        "arn:aws:s3:::market-lake/reference/*",
+        "arn:aws:s3:::market-lake/reference"
       ]
     },
     {
@@ -59,7 +63,8 @@
         "s3:AbortMultipartUpload"
       ],
       "Resource": [
-        "arn:aws:s3:::market-quarantine/*"
+        "arn:aws:s3:::market-quarantine/*",
+        "arn:aws:s3:::market-quarantine"
       ]
     }
   ]
