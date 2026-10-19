@@ -27,33 +27,33 @@ env:
 	fi
 
 up: env
-	docker compose -f $(COMPOSE_FILE) up -d --build
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d --build
 
 up-all: env
-	docker compose -f $(COMPOSE_FILE) --profile llm up -d --build
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) --profile llm up -d --build
 
 down:
-	docker compose -f $(COMPOSE_FILE) down
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) down
 
 restart: down up
 
 ps:
-	docker compose -f $(COMPOSE_FILE) ps
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) ps
 
 logs:
-	docker compose -f $(COMPOSE_FILE) logs -f
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) logs -f
 
 logs-api:
-	docker compose -f $(COMPOSE_FILE) logs -f api
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) logs -f api
 
 logs-kafka:
-	docker compose -f $(COMPOSE_FILE) logs -f kafka
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) logs -f kafka
 
 logs-spark:
-	docker compose -f $(COMPOSE_FILE) logs -f spark-master spark-worker
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) logs -f spark-master spark-worker
 
 logs-airflow:
-	docker compose -f $(COMPOSE_FILE) logs -f airflow
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) logs -f airflow
 
 clean:
-	docker compose -f $(COMPOSE_FILE) down -v --remove-orphans
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) down -v --remove-orphans
