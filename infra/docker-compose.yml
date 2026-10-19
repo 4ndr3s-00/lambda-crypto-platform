@@ -3,7 +3,7 @@ services:
   # 1. MinIO: Data Lake de Almacenamiento Duradero (Organización Funcional)
   # ----------------------------------------------------------------------------
   minio:
-    image: minio/minio:RELEASE.2024-03-15T01-07-19Z
+    image: cgr.dev/chainguard/minio:latest
     container_name: lambda-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -16,7 +16,7 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/9000"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -24,7 +24,7 @@ services:
       - lambda-net
 
   minio-init:
-    image: minio/mc:latest
+    image: cgr.dev/chainguard/minio:latest
     container_name: lambda-minio-init
     depends_on:
       minio:
@@ -34,7 +34,7 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniopassword123}
     volumes:
       - ./minio/init-buckets.sh:/init-buckets.sh:ro
-    entrypoint: ["/bin/sh", "/init-buckets.sh"]
+    entrypoint: ["/usr/bin/bash", "/init-buckets.sh"]
     networks:
       - lambda-net
 
@@ -115,7 +115,7 @@ services:
   # 4. Apache Spark: Master y Worker (Batch & Speed Layers)
   # ----------------------------------------------------------------------------
   spark-master:
-    image: bitnami/spark:3.5.1
+    image: bitnamilegacy/spark:3.5.1
     container_name: lambda-spark-master
     restart: unless-stopped
     environment:
@@ -131,7 +131,7 @@ services:
       - ../spark:/opt/bitnami/spark/jobs:ro
       - spark_data:/bitnami/spark
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      test: ["CMD", "/opt/bitnami/python/bin/python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080').read()"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -139,7 +139,7 @@ services:
       - lambda-net
 
   spark-worker:
-    image: bitnami/spark:3.5.1
+    image: bitnamilegacy/spark:3.5.1
     container_name: lambda-spark-worker
     restart: unless-stopped
     depends_on:
