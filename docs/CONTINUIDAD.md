@@ -33,11 +33,24 @@ automáticamente** al abrir el proyecto. Es decir: no hace falta explicarle
 nada a la sesión, ya sabe en qué punto quedó todo.
 
 ```bash
+# Ojo: `git clone` deja en la rama `main`, que NO contiene este trabajo.
 git clone https://github.com/4ndr3s-00/lambda-crypto-platform.git
 cd lambda-crypto-platform
-git checkout feature/spark-batch-ohlcv
+
+git checkout develop       # la rama de integración del equipo
+git pull origin develop
+
 opencode
 ```
+
+> **¿Por qué `develop` y no `main`?** La rama por defecto del repositorio es
+> `main`, que es la de producción y **no contiene el trabajo de las historias**.
+> Todo el desarrollo ocurre en `develop` (ver §3 del README).
+>
+> Si el PR #37 **aún no** se ha aceptado, usa en cambio la rama del PR:
+> ```bash
+> git checkout feature/spark-batch-ohlcv
+> ```
 
 En la sesión, escribe `/retomar` para que el agente inyecte el estado real de
 git, los PR abiertos y el estado de los issues, y te proponga los siguientes
@@ -58,10 +71,12 @@ curl -sSL https://raw.githubusercontent.com/4ndr3s-00/lambda-crypto-platform/fea
 git clone https://github.com/4ndr3s-00/lambda-crypto-platform.git
 cd lambda-crypto-platform
 
-# 2. Situarte en la rama de tu trabajo
-git checkout feature/spark-batch-ohlcv
-# Si la rama ya existe en remoto y la tienes localmente:
-#   git fetch origin && git checkout feature/spark-batch-ohlcv && git pull
+# 2. Situarte en la rama de trabajo
+#    Si el PR #37 ya fue aceptado y mergeado -> `develop`
+#    Si sigue abierto -> la rama del PR
+git checkout develop
+git pull origin develop
+# git checkout feature/spark-batch-ohlcv   # si el PR aún no se ha aceptado
 
 # 3. Regenerar la configuración
 make env            # equivalente a: cp .env.example .env

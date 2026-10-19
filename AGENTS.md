@@ -37,7 +37,29 @@ de Aceptación en BDD** y una **lista de tareas técnicas** marcadas con `- [ ]`
 
 ## 2. Estado actual (actualizado 2026-10-19)
 
-**Rama de trabajo: `feature/spark-batch-ohlcv`** → PR **#37** abierto hacia `develop`.
+> **Lee este apartado con atención, porque hay dos escenarios posibles** y el
+> texto de abajo puede quedarse desactualizado tras un merge. **Verifica siempre
+> el estado real antes de actuar** con:
+>
+> ```bash
+> git branch --show-current          # ¿en qué rama estás?
+> git log --oneline origin/develop -3   # ¿ya se integró el trabajo?
+> gh api repos/4ndr3s-00/lambda-crypto-platform/pulls/37 --jq '.state, .merged'
+> ```
+>
+> **Escenario A — el PR #37 sigue abierto (estado en el que se escribió esto):**
+> el trabajo vive en `feature/spark-batch-ohlcv` y **no** está en `develop`.
+> Trabaja en esa rama y no la mergees sin que el equipo lo apruebe.
+>
+> **Escenario B — el PR #37 ya fue aceptado y mergeado (lo esperado mañana):**
+> el código ya está en `develop`. Entonces **trabaja sobre `develop`**, la rama
+> `feature/spark-batch-ohlcv` ya es historia, y las issues US-10/11/12/21
+> deberían estar cerradas (en este repo la issue se cierra al mergear su PR).
+> Todo lo descrito abajo sigue siendo válido: los archivos, los comandos, las
+> decisiones de diseño y los errores ya resueltos.
+
+**Rama de trabajo: `feature/spark-batch-ohlcv`** → PR **#37** hacia `develop`.
+*(Si el PR ya se mergeó, pasa a trabajar sobre `develop`.)*
 
 ### Hecho y verificado
 
@@ -66,6 +88,9 @@ cea42bb feat(infra): permitir escalar el clúster Spark a varios workers
 ```
 
 ### Pendiente (prioridad en este orden)
+
+> Estos pasos asumen el **Escenario A** (PR sin mergear). Si el PR ya se
+> aceptó, el paso 1 está hecho y el trabajo continúa sobre `develop`.
 
 1. **Conseguir la revisión del PR #37.** El PR está **abierto y sin mergear**,
    esperando que los compañeros del equipo lo verifiquen (aún no hay revisiones
