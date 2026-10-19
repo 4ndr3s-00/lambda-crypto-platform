@@ -68,3 +68,4 @@ Thumbs.db
 
 # Ollama local cache
 ollama-models/
+.pytest_cache/
