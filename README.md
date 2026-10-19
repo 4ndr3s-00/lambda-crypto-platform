@@ -86,9 +86,11 @@ lambda-crypto-platform/
 │   └── contracts/                   # Esquema canónico de validación de eventos
 │       └── market_event.schema.json
 ├── spark/                           # Lógica de procesamiento distribuido
-│   ├── .gitkeep                     # Jobs de Spark Batch, Structured Streaming y Reconciliación
+│   ├── spark_session.py             # Sesión Spark con cliente S3A (Hadoop-AWS)
+│   ├── batch_historical.py          # Spark Batch: normalización, dedup, OHLCV y retornos
+│   └── serving_reconcile.py         # Reconciliación Lambda entre Speed y Batch
 ├── dags/                            # Orquestación de flujos batch con Apache Airflow
-│   └── .gitkeep                     # DAGs de ingesta, recálculo, DLQ y calidad
+│   └── batch_recompute.py           # DAG de recálculo batch con Spark (US-15)
 ├── metadata/                        # Catálogo (OpenMetadata), Linaje (OpenLineage) y Gobierno (Atlas)
 │   └── README.md
 ├── api/                             # Serving Layer (FastAPI)
@@ -163,6 +165,51 @@ make ps
 Si tu equipo cuenta con al menos 12 GB de RAM o GPU dedicada:
 ```bash
 make up-all
+```
+
+### 6. Ejecutar el Spark Batch (capa Batch)
+
+El job `spark/batch_historical.py` lee el histórico de MinIO vía S3A,
+normaliza y deduplica los eventos, y calcula las velas OHLCV y los retornos
+escribiéndolos de forma idempotente en `s3://market-lake/batch-results/`.
+
+```bash
+# Recálculo de un mes para dos símbolos
+docker exec lambda-spark-master bash -c '
+  cd /opt/bitnami/spark/jobs && spark-submit \
+    --master spark://spark-master:7077 \
+    --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 \
+    --conf spark.hadoop.fs.s3a.path.style.access=true \
+    --conf spark.hadoop.fs.s3a.connection.ssl.enabled=false \
+    --conf spark.hadoop.fs.s3a.aws.credentials.provider=org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider \
+    batch_historical.py \
+    --start-date 2026-09-01 --end-date 2026-09-30 \
+    --symbols BTCUSDT,ETHUSDT \
+    --intervals 1m,5m,1h,1d'
+```
+
+Opciones disponibles:
+
+| Flag | Descripción |
+| :--- | :--- |
+| `--start-date` / `--end-date` | Rango a procesar (inclusive). Ambos son obligatorios. |
+| `--symbols` | Lista de símbolos separados por coma. Si se omite, se procesan todos. |
+| `--intervals` | Granularidades: `1m`, `5m`, `1h`, `1d` (por defecto, todas). |
+| `--metrics` | Métricas a producir: `ohlcv`, `returns` (por defecto, ambas). |
+| `--quarantine-invalid` | Envía los eventos que violan el contrato a la DLQ. |
+
+El mismo recálculo puede dispararse desde Airflow con el DAG
+`batch_recompute`, que por defecto procesa el día anterior a las 02:00 UTC.
+
+### 7. Ejecutar las pruebas
+
+Las pruebas de la capa Spark usan una SparkSession local, por lo que no
+necesitan el clúster en marcha:
+
+```bash
+docker exec lambda-spark-master bash -c '
+  pip install --no-cache-dir pytest==8.3.4 && \
+  cd /opt/bitnami/spark/jobs && python -m pytest . -v'
 ```
 
 ---
