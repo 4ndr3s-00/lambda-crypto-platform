@@ -1,0 +1,43 @@
+# ==============================================================================
+# OpenMetadata Connector: PostgreSQL Serving & Metastores (US-25)
+# Responsable: Samuel Roncancio (Data Architect & Storage Lead)
+# ==============================================================================
+
+source:
+  type: postgres
+  serviceName: postgres_serving_layer
+  serviceConnection:
+    config:
+      type: Postgres
+      username: "${SERVING_DB_USER:-serving_user}"
+      authType:
+        password: "${SERVING_DB_PASSWORD:-serving_secure_pass123}"
+      hostPort: "postgres:5432"
+      database: "${SERVING_DB_NAME:-serving_db}"
+      scheme: postgresql+psycopg2
+  sourceConfig:
+    config:
+      type: DatabaseMetadata
+      markDeletedTablesFromFilterOnly: false
+      includeTables: true
+      includeViews: true
+      schemaFilterPattern:
+        includes:
+          - serving.*
+      tableFilterPattern:
+        includes:
+          - dim_assets
+          - pipeline_execution_log
+          - ohlcv_reconciled
+          - realtime_metrics
+          - pipeline_status
+
+sink:
+  type: metadata-rest
+  config: {}
+
+workflowConfig:
+  openMetadataServerConnection:
+    hostPort: "http://openmetadata-server:8585/api"
+    authProvider: openmetadata
+    securityConfig: {}

@@ -307,6 +307,76 @@ services:
     networks:
       - lambda-net
 
+  # ----------------------------------------------------------------------------
+  # 8. OpenMetadata & OpenSearch: Catálogo de Datos, Linaje y Calidad (Perfil 'metadata')
+  # ----------------------------------------------------------------------------
+  opensearch:
+    image: opensearchproject/opensearch:2.11.0
+    container_name: lambda-opensearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "${OPENSEARCH_PORT:-9200}:9200"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    profiles:
+      - metadata
+    networks:
+      - lambda-net
+
+  openmetadata-server:
+    image: docker.getcollate.io/openmetadata/server:1.4.1
+    container_name: lambda-openmetadata-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    environment:
+      - DB_DRIVER_CLASS=org.postgresql.Driver
+      - DB_SCHEME=postgresql
+      - DB_USE_SSL=false
+      - DB_USER=${POSTGRES_USER:-postgres}
+      - DB_USER_PASSWORD=${POSTGRES_PASSWORD:-postgres_secure_pass}
+      - DB_HOST=postgres
+      - DB_PORT=${POSTGRES_PORT:-5432}
+      - DB_DATABASE=openmetadata_db
+      - SEARCH_TYPE=opensearch
+      - SEARCH_HOST=opensearch
+      - SEARCH_PORT=9200
+      - SEARCH_SCHEME=http
+      - OPENMETADATA_SERVER_HOST=0.0.0.0
+      - OPENMETADATA_SERVER_PORT=8585
+    ports:
+      - "${OPENMETADATA_PORT:-8585}:8585"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8585/api/v1/system/version"]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+    profiles:
+      - metadata
+    networks:
+      - lambda-net
+
 networks:
   lambda-net:
     name: lambda-platform-network
@@ -319,3 +389,4 @@ volumes:
   spark_data:
   airflow_logs:
   ollama_data:
+  opensearch_data:
