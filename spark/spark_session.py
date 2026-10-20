@@ -83,6 +83,14 @@ def build_spark_session(
             "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1",
         )
 
+    # Añadir soporte de OpenLineage listener (US-26)
+    if os.environ.get("OPENLINEAGE_ENABLED", "").lower() in ("true", "1", "yes"):
+        builder = (
+            builder.config("spark.extraListeners", "io.openlineage.spark.agent.OpenLineageSparkListener")
+            .config("spark.openlineage.appName", app_name)
+            .config("spark.openlineage.namespace", os.environ.get("OPENLINEAGE_NAMESPACE", "lambda-crypto-platform"))
+        )
+
     return builder.getOrCreate()
 
 
