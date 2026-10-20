@@ -1,0 +1,120 @@
+{
+  "entities": [
+    {
+      "typeName": "s3_bucket",
+      "qualifiedName": "minio://market-lake/historical",
+      "name": "market-lake-historical",
+      "description": "Eventos crudos de mercado particionados por source y date en MinIO",
+      "classifications": ["Datos_Publicos_Mercado", "Datos_Historicos_Inmutables"],
+      "glossaryTerms": ["Event_Time"],
+      "attributes": {
+        "fuente_origen": "connectors-rest-ws",
+        "formato_almacenamiento": "json/parquet",
+        "es_publico": true
+      }
+    },
+    {
+      "typeName": "s3_bucket",
+      "qualifiedName": "minio://market-lake/batch-results",
+      "name": "market-lake-batch-results",
+      "description": "Agregaciones históricas consolidadas (OHLCV y retornos) de la capa Batch",
+      "classifications": ["Datos_Publicos_Mercado", "Datos_Historicos_Inmutables"],
+      "glossaryTerms": ["Vela_Japonesa_OHLCV", "Retorno_Porcentual", "Precio_de_Cierre"],
+      "attributes": {
+        "fuente_origen": "spark-batch-historical",
+        "formato_almacenamiento": "parquet",
+        "es_publico": true
+      }
+    },
+    {
+      "typeName": "s3_bucket",
+      "qualifiedName": "minio://market-quarantine",
+      "name": "market-quarantine-bucket",
+      "description": "Bucket de aislamiento para eventos con errores de contrato o sintaxis",
+      "classifications": ["Datos_Cuarentena_DLQ"],
+      "glossaryTerms": [],
+      "attributes": {
+        "causa_rechazo": "contract_violation_or_corrupt_syntax",
+        "destino_cuarentena": "market-quarantine"
+      }
+    },
+    {
+      "typeName": "kafka_topic",
+      "qualifiedName": "kafka://kafka:9092/market.events",
+      "name": "market.events",
+      "description": "Topic Kafka principal con el flujo en streaming de eventos crudos",
+      "classifications": ["Datos_Publicos_Mercado"],
+      "glossaryTerms": ["Event_Time"],
+      "attributes": {
+        "fuente_origen": "market-connectors",
+        "frecuencia_actualizacion": "streaming-ms",
+        "es_publico": true
+      }
+    },
+    {
+      "typeName": "kafka_topic",
+      "qualifiedName": "kafka://kafka:9092/market.metrics",
+      "name": "market.metrics",
+      "description": "Topic Kafka con métricas en ventanas deslizantes generadas por Spark Streaming",
+      "classifications": ["Datos_Publicos_Mercado", "Datos_Provisionales_Speed"],
+      "glossaryTerms": ["Volumen_Ponderado", "Retorno_Porcentual", "Datos_Provisionales_Speed", "Watermark"],
+      "attributes": {
+        "fuente_origen": "spark-structured-streaming",
+        "capa_origen": "Speed Layer (Spark Streaming)",
+        "reconciliado_por_batch": false,
+        "es_publico": true
+      }
+    },
+    {
+      "typeName": "kafka_topic",
+      "qualifiedName": "kafka://kafka:9092/market.dlq",
+      "name": "market.dlq",
+      "description": "Dead-Letter Queue en Kafka para eventos anómalos rechazados por el stream",
+      "classifications": ["Datos_Cuarentena_DLQ"],
+      "glossaryTerms": [],
+      "attributes": {
+        "causa_rechazo": "unparseable_or_contract_invalid",
+        "destino_cuarentena": "market.dlq"
+      }
+    },
+    {
+      "typeName": "rdbms_table",
+      "qualifiedName": "postgres://serving_db/serving.realtime_metrics",
+      "name": "serving.realtime_metrics",
+      "description": "Tabla de serving rápido con cotizaciones de alta frecuencia provisionales",
+      "classifications": ["Datos_Publicos_Mercado", "Datos_Provisionales_Speed"],
+      "glossaryTerms": ["Precio_de_Cierre", "Volumen_Ponderado", "Datos_Provisionales_Speed"],
+      "attributes": {
+        "fuente_origen": "speed-layer",
+        "capa_origen": "Speed Layer (Spark Streaming)",
+        "reconciliado_por_batch": false,
+        "es_publico": true
+      }
+    },
+    {
+      "typeName": "rdbms_table",
+      "qualifiedName": "postgres://serving_db/serving.ohlcv_reconciled",
+      "name": "serving.ohlcv_reconciled",
+      "description": "Velas reconciliadas combinando Batch consolidado con Speed reciente",
+      "classifications": ["Datos_Publicos_Mercado"],
+      "glossaryTerms": ["Vela_Japonesa_OHLCV", "Precio_de_Cierre", "Retorno_Porcentual"],
+      "attributes": {
+        "fuente_origen": "serving-reconciliation-layer",
+        "es_publico": true
+      }
+    },
+    {
+      "typeName": "rdbms_table",
+      "qualifiedName": "postgres://serving_db/serving.pipeline_execution_log",
+      "name": "serving.pipeline_execution_log",
+      "description": "Registro de auditoría interna, latencias, cortes y estado de pipelines",
+      "classifications": ["Metadatos_Sensibles"],
+      "glossaryTerms": [],
+      "attributes": {
+        "nivel_criticidad": "ALTO",
+        "normativa_aplicable": "SOC2",
+        "requiere_cifrado": true
+      }
+    }
+  ]
+}

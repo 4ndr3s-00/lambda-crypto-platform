@@ -1,4 +1,4 @@
-"""RAG index for platform documentation and financial glossary (US-28).
+﻿"""RAG index for platform documentation and financial glossary (US-28).
 
 Backend selection:
     - ChromaDB persistent collection when `chromadb` is installed.
@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-TOKEN_RE = re.compile(r"[a-záéíóúüñ0-9]{2,}", re.IGNORECASE)
+TOKEN_RE = re.compile(r"[a-zÃ¡Ã©Ã­Ã³ÃºÃ¼Ã±0-9]{2,}", re.IGNORECASE)
 STOPWORDS = frozenset(
     {
         "de",
@@ -508,7 +508,10 @@ class RagIndex:
 
 
 def build_default_index(force: bool = False) -> dict[str, Any]:
-    from .config import get_settings
+    try:
+        from .config import get_settings
+    except ImportError:  # Docker / uvicorn main:app
+        from config import get_settings
 
     settings = get_settings()
     index = RagIndex(settings.rag_index_path, settings.rag_docs_dir, settings.glossary_path)
@@ -516,14 +519,17 @@ def build_default_index(force: bool = False) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Indexa documentación y glosario para RAG")
-    parser.add_argument("--docs", type=Path, help="Directorio de documentación (default: metadata/)")
+    parser = argparse.ArgumentParser(description="Indexa documentaciÃ³n y glosario para RAG")
+    parser.add_argument("--docs", type=Path, help="Directorio de documentaciÃ³n (default: metadata/)")
     parser.add_argument("--glossary", type=Path, help="JSON de glosario")
-    parser.add_argument("--index", type=Path, help="Ruta del índice JSON")
+    parser.add_argument("--index", type=Path, help="Ruta del Ã­ndice JSON")
     parser.add_argument("--rebuild", action="store_true", help="Reconstruir desde cero")
     args = parser.parse_args()
 
-    from .config import get_settings
+    try:
+        from .config import get_settings
+    except ImportError:  # Docker / uvicorn main:app
+        from config import get_settings
 
     settings = get_settings()
     index = RagIndex(

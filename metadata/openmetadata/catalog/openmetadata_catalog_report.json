@@ -1,0 +1,265 @@
+{
+  "metadata_header": {
+    "version": "1.0",
+    "service_owners": {
+      "technical_lead": {
+        "name": "Samuel Roncancio",
+        "email": "samueroncacio@gmail.com",
+        "role": "Data Architect & Storage Lead"
+      },
+      "processing_lead": {
+        "name": "Andrés Blanco",
+        "email": "andresblancocenteno2@gmail.com",
+        "role": "Big Data Processing Engineer"
+      },
+      "streaming_lead": {
+        "name": "Samuel Benavidez",
+        "email": "samuel.benavidez@riwi.io",
+        "role": "Streaming & Ingestion Engineer"
+      }
+    },
+    "catalog_datasets": [
+      {
+        "name": "market_events_raw",
+        "fullyQualifiedName": "minio_market_lake.market-lake.historical.events",
+        "type": "datalake_table",
+        "source": "MinIO S3 (s3://market-lake/historical/)",
+        "owner": "Samuel Roncancio",
+        "tier": "Tier 1",
+        "frequency": "Continuo (micro-lotes) / Diario batch",
+        "sla": "Frescura <= 5 minutos",
+        "description": "Eventos crudos de transacciones y ticks de mercado cripto normalizados",
+        "columns": [
+          {
+            "name": "event_id",
+            "type": "string",
+            "description": "Identificador UUID único del evento"
+          },
+          {
+            "name": "source",
+            "type": "string",
+            "description": "Proveedor de origen (binance, coingecko)"
+          },
+          {
+            "name": "exchange",
+            "type": "string",
+            "description": "Exchange emisor de la cotización"
+          },
+          {
+            "name": "symbol",
+            "type": "string",
+            "description": "Par de activo negociado (ej. BTCUSDT)"
+          },
+          {
+            "name": "event_time",
+            "type": "timestamp",
+            "description": "Marca de tiempo del trade en UTC"
+          },
+          {
+            "name": "ingestion_time",
+            "type": "timestamp",
+            "description": "Marca de tiempo de captura en UTC"
+          },
+          {
+            "name": "price",
+            "type": "float",
+            "description": "Precio unitario ejecutado (> 0)"
+          },
+          {
+            "name": "quantity",
+            "type": "float",
+            "description": "Volumen o cantidad del trade (>= 0)"
+          }
+        ]
+      },
+      {
+        "name": "batch_ohlcv_consolidated",
+        "fullyQualifiedName": "minio_market_lake.market-lake.batch-results.ohlcv",
+        "type": "datalake_table",
+        "source": "MinIO S3 (s3://market-lake/batch-results/metric=ohlcv/)",
+        "owner": "Andrés Blanco",
+        "tier": "Tier 1",
+        "frequency": "Diario a las 00:00 UTC",
+        "sla": "Consolidación <= 30 minutos tras cierre",
+        "description": "Vistas maestras históricas de velas OHLCV recalculadas de forma idempotente",
+        "columns": [
+          {
+            "name": "symbol",
+            "type": "string",
+            "description": "Par cripto"
+          },
+          {
+            "name": "timeframe",
+            "type": "string",
+            "description": "Granularidad temporal (1m, 5m, 1h, 1d)"
+          },
+          {
+            "name": "bucket_start",
+            "type": "timestamp",
+            "description": "Inicio de la ventana"
+          },
+          {
+            "name": "bucket_end",
+            "type": "timestamp",
+            "description": "Fin de la ventana"
+          },
+          {
+            "name": "open",
+            "type": "float",
+            "description": "Precio de apertura"
+          },
+          {
+            "name": "high",
+            "type": "float",
+            "description": "Precio máximo alcanzado"
+          },
+          {
+            "name": "low",
+            "type": "float",
+            "description": "Precio mínimo alcanzado"
+          },
+          {
+            "name": "close",
+            "type": "float",
+            "description": "Precio de cierre"
+          },
+          {
+            "name": "volume",
+            "type": "float",
+            "description": "Volumen total transaccionado"
+          }
+        ]
+      },
+      {
+        "name": "postgres_dim_assets",
+        "fullyQualifiedName": "postgres_serving_layer.serving_db.serving.dim_assets",
+        "type": "relational_table",
+        "source": "PostgreSQL (serving_db.serving.dim_assets)",
+        "owner": "Samuel Roncancio",
+        "tier": "Tier 1",
+        "frequency": "Bajo demanda / Actualización diaria",
+        "sla": "Disponibilidad 99.9%",
+        "description": "Tabla de dimensión maestra de activos disponibles e indexados",
+        "columns": [
+          {
+            "name": "symbol",
+            "type": "string",
+            "description": "Clave primaria del activo"
+          },
+          {
+            "name": "exchange",
+            "type": "string",
+            "description": "Exchange asociado"
+          },
+          {
+            "name": "asset_name",
+            "type": "string",
+            "description": "Nombre legible del par"
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "description": "Estado operativo (ACTIVE/INACTIVE)"
+          }
+        ]
+      },
+      {
+        "name": "kafka_market_events_topic",
+        "fullyQualifiedName": "kafka_market_events.market.events",
+        "type": "kafka_topic",
+        "source": "Apache Kafka (broker: kafka:9092, topic: market.events)",
+        "owner": "Samuel Benavidez",
+        "tier": "Tier 1",
+        "frequency": "Streaming continuo en tiempo real",
+        "sla": "Latencia de entrega < 1 segundo",
+        "description": "Bus central de mensajería distribuida particionado por clave exchange|symbol",
+        "columns": [
+          {
+            "name": "key",
+            "type": "string",
+            "description": "Clave compuesta exchange|symbol"
+          },
+          {
+            "name": "value",
+            "type": "json",
+            "description": "Payload validado bajo market_event.schema.json"
+          }
+        ]
+      }
+    ]
+  },
+  "generated_at": "2026-10-20T13:08:32.925830+00:00",
+  "profiling": {
+    "profile_timestamp": "2026-10-20T13:08:32.925699+00:00",
+    "row_count": 10,
+    "columns": {
+      "price": {
+        "min": 2654.2,
+        "max": 68062.5,
+        "mean": 35350.05,
+        "null_count": 0,
+        "null_proportion": 0.0
+      },
+      "quantity": {
+        "min": 0.55,
+        "max": 3.6,
+        "mean": 1.875,
+        "null_count": 0,
+        "null_proportion": 0.0
+      },
+      "symbol": {
+        "cardinality": 2,
+        "distinct_values": [
+          "BTCUSDT",
+          "ETHUSDT"
+        ],
+        "null_count": 0
+      },
+      "event_time": {
+        "null_count": 0,
+        "null_proportion": 0.0
+      },
+      "event_id": {
+        "null_count": 0,
+        "distinct_count": 10
+      }
+    }
+  },
+  "quality_tests": {
+    "suite_name": "market_event_contract_test_suite",
+    "evaluated_at": "2026-10-20T13:08:32.925779+00:00",
+    "total_records": 10,
+    "tests": [
+      {
+        "test_name": "columnValuesToBeNotNull_event_time",
+        "column": "event_time",
+        "status": "PASSED",
+        "null_count": 0,
+        "assertion": "event_time IS NOT NULL"
+      },
+      {
+        "test_name": "columnValuesToBeNotNull_price",
+        "column": "price",
+        "status": "PASSED",
+        "null_count": 0,
+        "assertion": "price IS NOT NULL"
+      },
+      {
+        "test_name": "columnValuesToBeUnique_event_id",
+        "column": "event_id",
+        "status": "PASSED",
+        "duplicate_count": 0,
+        "unique_records": 10,
+        "assertion": "event_id IS UNIQUE"
+      },
+      {
+        "test_name": "columnValuesToBeGreaterThan_price_0",
+        "column": "price",
+        "status": "PASSED",
+        "invalid_count": 0,
+        "assertion": "price > 0.0"
+      }
+    ],
+    "all_passed": true
+  }
+}

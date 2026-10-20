@@ -1,66 +1,70 @@
-﻿# Plataforma de Datos Financieros y Criptomonedas (Arquitectura Lambda)
+# Plataforma de Datos Financieros y Criptomonedas (Arquitectura Lambda)
 
-[![Arquitectura](https://img.shields.io/badge/PatrÃ³n-Lambda%20v2.0-blue.svg)](#decisiÃ³n-arquitectÃ³nica)
-[![Docker](https://img.shields.io/badge/Docker%20Compose-v2.20+-2496ED.svg?logo=docker)](#guÃ­a-rÃ¡pida-de-despliegue-quickstart)
+[![Arquitectura](https://img.shields.io/badge/Patrón-Lambda%20v2.0-blue.svg)](#decisión-arquitectónica)
+[![Docker](https://img.shields.io/badge/Docker%20Compose-v2.20+-2496ED.svg?logo=docker)](#guía-rápida-de-despliegue-quickstart)
 [![Kafka](https://img.shields.io/badge/Apache%20Kafka-3.7%20(KRaft)-231F20.svg?logo=apachekafka)](#matriz-de-servicios-y-puertos)
 [![Spark](https://img.shields.io/badge/Apache%20Spark-3.5-E25A1C.svg?logo=apachespark)](#matriz-de-servicios-y-puertos)
 [![Airflow](https://img.shields.io/badge/Apache%20Airflow-2.8-017CEE.svg?logo=apacheairflow)](#matriz-de-servicios-y-puertos)
 [![MinIO](https://img.shields.io/badge/MinIO-S3%20Compatible-C72C48.svg?logo=minio)](#matriz-de-servicios-y-puertos)
 [![Licencia](https://img.shields.io/badge/Licencia-MIT-green.svg)](LICENSE)
 
-Plataforma distribuida y extensible para la ingesta, procesamiento, reconciliaciÃ³n y visualizaciÃ³n de datos financieros y de criptomonedas a gran escala, implementando estrictamente el **patrÃ³n Lambda** sin capas Medallion.
+Plataforma distribuida y extensible para la ingesta, procesamiento, reconciliación y visualización de datos financieros y de criptomonedas a gran escala, implementando estrictamente el **patrón Lambda** sin capas Medallion.
 
 ---
 
-## 1. DecisiÃ³n ArquitectÃ³nica
+## 1. Decisión Arquitectónica
 
-Esta plataforma implementa **Arquitectura Lambda** clÃ¡sica de tres capas fundamentales:
+Esta plataforma implementa **Arquitectura Lambda** clásica de tres capas fundamentales:
 
 ```
-                               â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-                               â”‚  Fuentes de Datos (Mercado)    â”‚
-                               â”‚  APIs REST Â· WebSockets Â· CSV  â”‚
-                               â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                                               â”‚
-                                               â–¼
-                               â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-                               â”‚  Bus de Eventos (Apache Kafka) â”‚
-                               â”‚  Topics Â· Particiones Â· DLQ    â”‚
-                               â””â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”˜
-                                       â”‚                â”‚
-                     eventos histÃ³ricosâ”‚                â”‚eventos recientes
-                               / replayâ”‚                â”‚
-                                       â–¼                â–¼
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚                 BATCH LAYER                  â”‚  â”‚                 SPEED LAYER                  â”‚
-â”‚ â€¢ Airflow orquesta extracciones y backfills  â”‚  â”‚ â€¢ Spark Structured Streaming (baja latencia) â”‚
-â”‚ â€¢ Spark Batch recalcula histÃ³ricos completos â”‚  â”‚ â€¢ Ventanas por event-time y watermarking     â”‚
-â”‚ â€¢ MinIO conserva datos y resultados batch    â”‚  â”‚ â€¢ Checkpoints duraderos y desvÃ­o a DLQ       â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                       â”‚                                                 â”‚
-                       â”‚ resultados histÃ³ricos                           â”‚ mÃ©tricas recientes
-                       â”‚ consolidados                                    â”‚ (ventanas cortas)
-                       â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                                               â”‚
-                                               â–¼
-                               â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-                               â”‚         SERVING LAYER          â”‚
-                               â”‚  ReconciliaciÃ³n por Event-Time â”‚
-                               â”‚  DeduplicaciÃ³n & Precedencia   â”‚
-                               â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                                               â”‚
-                                               â–¼
-                               â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-                               â”‚    FastAPI + Dashboard HTML    â”‚
-                               â”‚  + Asistente Local (Qwen 2.5)  â”‚
-                               â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                               ┌────────────────────────────────┐
+                               │  Fuentes de Datos (Mercado)    │
+                               │  APIs REST · WebSockets · CSV  │
+                               └───────────────┬────────────────┘
+                                               │
+                                               ▼
+                               ┌────────────────────────────────┐
+                               │  Bus de Eventos (Apache Kafka) │
+                               │  Topics · Particiones · DLQ    │
+                               └───────┬────────────────┬───────┘
+                                       │                │
+                     eventos históricos│                │eventos recientes
+                               / replay│                │
+                                       ▼                ▼
+┌──────────────────────────────────────────────┐  ┌──────────────────────────────────────────────┐
+│                 BATCH LAYER                  │  │                 SPEED LAYER                  │
+│ • Airflow orquesta extracciones y backfills  │  │ • Spark Structured Streaming (baja latencia) │
+│ • Spark Batch recalcula históricos completos │  │ • Ventanas por event-time y watermarking     │
+│ • MinIO conserva datos y resultados batch    │  │ • Checkpoints duraderos y desvío a DLQ       │
+└──────────────────────┬───────────────────────┘  └──────────────────────┬───────────────────────┘
+                       │                                                 │
+                       │ resultados históricos                           │ métricas recientes
+                       │ consolidados                                    │ (ventanas cortas)
+                       └───────────────────────┬─────────────────────────┘
+                                               │
+                                               ▼
+                               ┌────────────────────────────────┐
+                               │         SERVING LAYER          │
+                               │  Reconciliación por Event-Time │
+                               │  Deduplicación & Precedencia   │
+                               └───────────────┬────────────────┘
+                                               │
+                                               ▼
+                               ┌────────────────────────────────┐
+                               │    FastAPI + Dashboard HTML    │
+                               │  + Asistente Local (Qwen 2.5)  │
+                               └────────────────────────────────┘
 ```
 
-### Â¿Por quÃ© NO capas Medallion?
-La arquitectura Medallion (Bronze/Silver/Gold) es un patrÃ³n alternativo centrado en niveles progresivos de refinamiento en almacenamiento lakehouse. En este proyecto se optÃ³ por el **patrÃ³n Lambda puro**, caracterizado por:
-1. **SeparaciÃ³n operativa estricta**: Batch Layer (precisiÃ³n, inmutabilidad, reprocesamiento) y Speed Layer (baja latencia, ventanas temporales recientes).
-2. **OrganizaciÃ³n funcional en MinIO**: Almacenamiento organizado por propÃ³sito funcional (`historical/`, `batch-results/`, `reference/`, `checkpoints/`, `quarantine/`), no por niveles Bronze/Silver/Gold.
-3. **ReconciliaciÃ³n en Serving**: La capa de servicio resuelve colisiones y solapamientos con base en marcas temporales de evento (*event-time*), no por hora de llegada.
+### ¿Por qué NO capas Medallion?
+La arquitectura Medallion (Bronze/Silver/Gold) es un patrón alternativo centrado en niveles progresivos de refinamiento en almacenamiento lakehouse. En este proyecto se optó por el **patrón Lambda puro**, caracterizado por:
+1. **Separación operativa estricta**: Batch Layer (precisión, inmutabilidad, reprocesamiento) y Speed Layer (baja latencia, ventanas temporales recientes).
+2. **Organización funcional en MinIO**: Almacenamiento organizado por propósito funcional (`historical/`, `batch-results/`, `reference/`, `checkpoints/`, `quarantine/`), no por niveles Bronze/Silver/Gold.
+3. **Reconciliación en Serving**: La capa de servicio resuelve colisiones y solapamientos con base en marcas temporales de evento (*event-time*), no por hora de llegada.
+
+> **¿Retomas el trabajo en otra máquina?** Consulta la
+> [guía de continuidad](docs/CONTINUIDAD.md): explica qué se conserva, qué se
+> reconstruye y los pasos exactos para dejar la plataforma operativa de nuevo.
 
 ---
 
@@ -70,70 +74,76 @@ El proyecto sigue una estructura modular orientada a desacoplar infraestructura,
 
 ```text
 lambda-crypto-platform/
-â”œâ”€â”€ infra/                           # OrquestaciÃ³n de infraestructura local
-â”‚   â”œâ”€â”€ docker-compose.yml           # Stack multicontenedor (Kafka, MinIO, Spark, Airflow, Postgres, API)
-â”‚   â”œâ”€â”€ minio/                       # InicializaciÃ³n de buckets funcionales
-â”‚   â”‚   â””â”€â”€ init-buckets.sh
-â”‚   â”œâ”€â”€ kafka/                       # InicializaciÃ³n de topics, particiones y retenciÃ³n
-â”‚   â”‚   â””â”€â”€ init-topics.sh
-â”‚   â”œâ”€â”€ postgres/                    # Esquema relacional para Airflow y Serving Layer
-â”‚   â”‚   â””â”€â”€ init.sql
-â”‚   â””â”€â”€ airflow/                     # Imagen base para Airflow con dependencias PySpark y conectores
-â”‚       â””â”€â”€ Dockerfile
-â”œâ”€â”€ ingestion/                       # Conectores y contratos de datos
-â”‚   â”œâ”€â”€ connectors/                  # Adaptadores REST, WebSocket y CSV
-â”‚   â”‚   â””â”€â”€ .gitkeep
-â”‚   â””â”€â”€ contracts/                   # Esquema canÃ³nico de validaciÃ³n de eventos
-â”‚       â””â”€â”€ market_event.schema.json
-â”œâ”€â”€ spark/                           # LÃ³gica de procesamiento distribuido
-â”‚   â”œâ”€â”€ .gitkeep                     # Jobs de Spark Batch, Structured Streaming y ReconciliaciÃ³n
-â”œâ”€â”€ dags/                            # OrquestaciÃ³n de flujos batch con Apache Airflow
-â”‚   â””â”€â”€ .gitkeep                     # DAGs de ingesta, recÃ¡lculo, DLQ y calidad
-â”œâ”€â”€ metadata/                        # CatÃ¡logo (OpenMetadata), Linaje (OpenLineage) y Gobierno (Atlas)
-â”‚   â””â”€â”€ README.md
-â”œâ”€â”€ api/                             # Serving Layer (FastAPI)
-â”‚   â”œâ”€â”€ Dockerfile
-â”‚   â”œâ”€â”€ main.py                      # Punto de entrada de la API
-â”‚   â””â”€â”€ requirements.txt
-â”œâ”€â”€ frontend/                        # Dashboard web interactivo
-â”‚   â””â”€â”€ .gitkeep
-â”œâ”€â”€ tests/                           # BaterÃ­a de pruebas
-â”‚   â”œâ”€â”€ unit/                        # Pruebas unitarias de transformaciones y contratos
-â”‚   â”œâ”€â”€ integration/                 # Pruebas de integraciÃ³n MinIO/Kafka/Postgres
-â”‚   â””â”€â”€ load/                        # Generador sintÃ©tico de estrÃ©s (millones de eventos)
-â”œâ”€â”€ Makefile                         # Comandos rÃ¡pidos de operaciÃ³n (make up, make down)
-â”œâ”€â”€ .env.example                     # Variables de entorno documentadas
-â”œâ”€â”€ .gitignore                       # Exclusiones de secretos, datos y temporales
-â””â”€â”€ README.md                        # DocumentaciÃ³n maestra
+├── infra/                           # Orquestación de infraestructura local
+│   ├── docker-compose.yml           # Stack multicontenedor (Kafka, MinIO, Spark, Airflow, Postgres, API)
+│   ├── minio/                       # Inicialización de buckets funcionales
+│   │   └── init-buckets.sh
+│   ├── kafka/                       # Inicialización de topics, particiones y retención
+│   │   └── init-topics.sh
+│   ├── postgres/                    # Esquema relacional para Airflow y Serving Layer
+│   │   └── init.sql
+│   └── airflow/                     # Imagen base para Airflow con dependencias PySpark y conectores
+│       └── Dockerfile
+├── ingestion/                       # Conectores y contratos de datos
+│   ├── connectors/                  # Adaptadores REST, WebSocket y CSV
+│   │   └── .gitkeep
+│   └── contracts/                   # Esquema canónico de validación de eventos
+│       └── market_event.schema.json
+├── spark/                           # Lógica de procesamiento distribuido
+│   ├── spark_session.py             # Sesión Spark con cliente S3A (Hadoop-AWS)
+│   ├── batch_historical.py          # Spark Batch: normalización, dedup, OHLCV y retornos
+│   └── serving_reconcile.py         # Reconciliación Lambda entre Speed y Batch
+├── dags/                            # Orquestación de flujos batch con Apache Airflow
+│   └── batch_recompute.py           # DAG de recálculo batch con Spark (US-15)
+├── metadata/                        # Catálogo (OpenMetadata), Linaje (OpenLineage) y Gobierno (Atlas)
+│   └── README.md
+├── api/                             # Serving Layer (FastAPI)
+│   ├── Dockerfile
+│   ├── main.py                      # Punto de entrada de la API
+│   └── requirements.txt
+├── frontend/                        # Dashboard web interactivo
+│   └── .gitkeep
+├── tests/                           # Batería de pruebas
+│   ├── unit/                        # Pruebas unitarias de transformaciones y contratos
+│   ├── integration/                 # Pruebas de integración MinIO/Kafka/Postgres
+│   ├── load/                        # Generador sintético de estrés (millones de eventos)
+│   └── requirements.txt             # Dependencias de las pruebas
+├── docs/                            # Documentación operativa
+│   └── CONTINUIDAD.md               # Guía de traspaso entre máquinas
+├── AGENTS.md                        # Contexto del proyecto para asistentes de IA
+├── Makefile                         # Comandos rápidos de operación (make up, make down)
+├── .env.example                     # Variables de entorno documentadas
+├── .gitignore                       # Exclusiones de secretos, datos y temporales
+└── README.md                        # Documentación maestra
 ```
 
 ---
 
 ## 3. Estrategia de Ramas (Git Branching Model)
 
-Para asegurar un desarrollo ordenado y concurrente entre los colaboradores del equipo, el repositorio utiliza la siguiente convenciÃ³n de ramas:
+Para asegurar un desarrollo ordenado y concurrente entre los colaboradores del equipo, el repositorio utiliza la siguiente convención de ramas:
 
-| Rama | PropÃ³sito | Responsable / Capa |
+| Rama | Propósito | Responsable / Capa |
 | :--- | :--- | :--- |
-| `main` | Rama principal de producciÃ³n. Solo cÃ³digo validado, documentado y listo para despliegue. | Core / Prod |
-| `develop` | Rama de integraciÃ³n continua donde convergen todos los mÃ³dulos antes de release. | IntegraciÃ³n |
-| `feature/infra-docker-setup` | ConfiguraciÃ³n del entorno Docker, redes, volÃºmenes, scripts de inicio y variables `.env`. | Infraestructura |
-| `feature/ingestion-connectors` | Desarrollo de conectores REST y WebSockets (Binance, CoinGecko, CSV) y validaciÃ³n de contrato JSON. | Ingesta & Contratos |
+| `main` | Rama principal de producción. Solo código validado, documentado y listo para despliegue. | Core / Prod |
+| `develop` | Rama de integración continua donde convergen todos los módulos antes de release. | Integración |
+| `feature/infra-docker-setup` | Configuración del entorno Docker, redes, volúmenes, scripts de inicio y variables `.env`. | Infraestructura |
+| `feature/ingestion-connectors` | Desarrollo de conectores REST y WebSockets (Binance, CoinGecko, CSV) y validación de contrato JSON. | Ingesta & Contratos |
 | `feature/speed-layer-spark-streaming` | Job Spark Structured Streaming, consumo de topics Kafka, ventanas de tiempo, DLQ y checkpoints. | Speed Layer |
-| `feature/batch-layer-spark-airflow` | Jobs Spark Batch idempotentes, cÃ¡lculo de agregaciones histÃ³ricas y DAGs de orquestaciÃ³n en Airflow. | Batch Layer |
-| `feature/serving-reconciliation-api` | Desarrollo de endpoints FastAPI, reglas de precedencia de datos (Batch vs Speed) y deduplicaciÃ³n. | Serving Layer |
-| `feature/frontend-dashboard` | Interfaz grÃ¡fica HTML5/CSS/JS con series temporales (OHLCV), volumen, indicadores y panel de control. | Consumo / UI |
-| `feature/governance-metadata-lineage` | Registro en catÃ¡logo OpenMetadata, taxonomÃ­a en Atlas y emisiÃ³n de eventos OpenLineage. | Gobierno |
-| `feature/qwen-llm-chat-rag` | IntegraciÃ³n del modelo local Qwen2.5 (Ollama) con guardrails de solo lectura y RAG sobre metadatos. | LLM / AnalÃ­tica |
+| `feature/batch-layer-spark-airflow` | Jobs Spark Batch idempotentes, cálculo de agregaciones históricas y DAGs de orquestación en Airflow. | Batch Layer |
+| `feature/serving-reconciliation-api` | Desarrollo de endpoints FastAPI, reglas de precedencia de datos (Batch vs Speed) y deduplicación. | Serving Layer |
+| `feature/frontend-dashboard` | Interfaz gráfica HTML5/CSS/JS con series temporales (OHLCV), volumen, indicadores y panel de control. | Consumo / UI |
+| `feature/governance-metadata-lineage` | Registro en catálogo OpenMetadata, taxonomía en Atlas y emisión de eventos OpenLineage. | Gobierno |
+| `feature/qwen-llm-chat-rag` | Integración del modelo local Qwen2.5 (Ollama) con guardrails de solo lectura y RAG sobre metadatos. | LLM / Analítica |
 
 ---
 
-## 4. GuÃ­a RÃ¡pida de Despliegue (`Quickstart`)
+## 4. Guía Rápida de Despliegue (`Quickstart`)
 
 ### Requisitos Previos
 * **Docker Engine** v24+ y **Docker Compose** v2.20+
 * **Git** 2.30+
-* MÃ­nimo **6 GB de RAM** libre (el stack estÃ¡ optimizado con Kafka KRaft sin ZooKeeper y lÃ­mites de memoria en workers).
+* Mínimo **6 GB de RAM** libre (el stack está optimizado con Kafka KRaft sin ZooKeeper y límites de memoria en workers).
 
 ### 1. Clonar el repositorio
 ```bash
@@ -159,10 +169,71 @@ make up
 make ps
 ```
 
-### 5. (Opcional) Levantar con LLM local Qwen2.5 (Ollama)
+### 5. (Opcional) Escalar el clúster Spark a varios workers
+Por defecto la plataforma levanta un único worker. Para añadir capacidad al
+clúster (útil para jobs batch pesados o en pruebas de carga) se puede escalar:
+```bash
+make scale-spark WORKERS=3
+```
+Cada worker adicional aporta `SPARK_WORKER_CORES` cores y `SPARK_WORKER_MEMORY`
+de memoria. Las Web UI de los workers quedan disponibles en los puertos
+`8081`, `8082`, `8083`... y el master muestra el total de cores del clúster en
+[http://localhost:8080](http://localhost:8080).
+
+Para volver a la configuración de un solo worker:
+```bash
+make scale-down
+```
+
+### 6. (Opcional) Levantar con LLM local Qwen2.5 (Ollama)
 Si tu equipo cuenta con al menos 12 GB de RAM o GPU dedicada:
 ```bash
 make up-all
+```
+
+### 7. Ejecutar el Spark Batch (capa Batch)
+
+El job `spark/batch_historical.py` lee el histórico de MinIO vía S3A,
+normaliza y deduplica los eventos, y calcula las velas OHLCV y los retornos
+escribiéndolos de forma idempotente en `s3://market-lake/batch-results/`.
+
+```bash
+# Recálculo de un mes para dos símbolos
+docker exec lambda-spark-master bash -c '
+  cd /opt/bitnami/spark/jobs && spark-submit \
+    --master spark://spark-master:7077 \
+    --conf spark.hadoop.fs.s3a.endpoint=http://minio:9000 \
+    --conf spark.hadoop.fs.s3a.path.style.access=true \
+    --conf spark.hadoop.fs.s3a.connection.ssl.enabled=false \
+    --conf spark.hadoop.fs.s3a.aws.credentials.provider=org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider \
+    batch_historical.py \
+    --start-date 2026-09-01 --end-date 2026-09-30 \
+    --symbols BTCUSDT,ETHUSDT \
+    --intervals 1m,5m,1h,1d'
+```
+
+Opciones disponibles:
+
+| Flag | Descripción |
+| :--- | :--- |
+| `--start-date` / `--end-date` | Rango a procesar (inclusive). Ambos son obligatorios. |
+| `--symbols` | Lista de símbolos separados por coma. Si se omite, se procesan todos. |
+| `--intervals` | Granularidades: `1m`, `5m`, `1h`, `1d` (por defecto, todas). |
+| `--metrics` | Métricas a producir: `ohlcv`, `returns` (por defecto, ambas). |
+| `--quarantine-invalid` | Envía los eventos que violan el contrato a la DLQ. |
+
+El mismo recálculo puede dispararse desde Airflow con el DAG
+`batch_recompute`, que por defecto procesa el día anterior a las 02:00 UTC.
+
+### 8. Ejecutar las pruebas
+
+Las pruebas de la capa Spark usan una SparkSession local, por lo que no
+necesitan el clúster en marcha:
+
+```bash
+docker exec lambda-spark-master bash -c '
+  pip install --no-cache-dir pytest==8.3.4 && \
+  cd /opt/bitnami/spark/jobs && python -m pytest . -v'
 ```
 
 ---
@@ -183,27 +254,27 @@ make up-all
 
 ---
 
-## 6. OrganizaciÃ³n de Datos en MinIO
+## 6. Organización de Datos en MinIO
 
-La arquitectura organiza los datos por funciÃ³n operativa en prefijos determinÃ­sticos:
+La arquitectura organiza los datos por función operativa en prefijos determinísticos:
 
 ```text
 s3://market-lake/
-â”œâ”€â”€ historical/source={exchange}/date=YYYY-MM-DD/     # Respuestas y eventos histÃ³ricos inmutables
-â”œâ”€â”€ batch-results/metric=ohlcv/symbol={symbol}/       # Agregaciones periÃ³dicas consolidadas (Parquet)
-â”œâ”€â”€ batch-results/metric=returns/symbol={symbol}/     # Retornos porcentuales y volatilidad batch
-â””â”€â”€ reference/symbols/                                # Metadatos de sÃ­mbolos, pares y contratos
+├── historical/source={exchange}/date=YYYY-MM-DD/     # Respuestas y eventos históricos inmutables
+├── batch-results/metric=ohlcv/symbol={symbol}/       # Agregaciones periódicas consolidadas (Parquet)
+├── batch-results/metric=returns/symbol={symbol}/     # Retornos porcentuales y volatilidad batch
+└── reference/symbols/                                # Metadatos de símbolos, pares y contratos
 
 s3://market-checkpoints/
-â””â”€â”€ spark/query={query_name}/                         # Checkpoints duraderos de streaming para recuperaciÃ³n
+└── spark/query={query_name}/                         # Checkpoints duraderos de streaming para recuperación
 
 s3://market-quarantine/
-â””â”€â”€ dead-letter/source={exchange}/date=YYYY-MM-DD/    # Eventos que violaron contrato o corruptos
+└── dead-letter/source={exchange}/date=YYYY-MM-DD/    # Eventos que violaron contrato o corruptos
 ```
 
 ---
 
-## 7. Contrato CanÃ³nico de Eventos
+## 7. Contrato Canónico de Eventos
 
 Todo evento emitido por los conectores REST, WebSockets o CSV hacia Kafka (`market.events`) debe validar contra [`ingestion/contracts/market_event.schema.json`](ingestion/contracts/market_event.schema.json):
 
@@ -225,7 +296,7 @@ Todo evento emitido por los conectores REST, WebSockets o CSV hacia Kafka (`mark
 
 ---
 
-## 8. GuÃ­a para Contribuir
+## 8. Guía para Contribuir
 
 1. **Crear una rama desde `develop`** con el prefijo correspondiente (`feature/`, `fix/`, `docs/`):
    ```bash
@@ -233,120 +304,55 @@ Todo evento emitido por los conectores REST, WebSockets o CSV hacia Kafka (`mark
    git pull origin develop
    git checkout -b feature/nombre-de-la-tarea
    ```
-2. **Formatear commits bajo el estÃ¡ndar [Conventional Commits](https://www.conventionalcommits.org/):**
-   * `feat: descripciÃ³n de nueva funcionalidad`
-   * `fix: correcciÃ³n de error`
-   * `docs: actualizaciÃ³n de documentaciÃ³n`
-   * `chore: configuraciÃ³n o mantenimiento`
+2. **Formatear commits bajo el estándar [Conventional Commits](https://www.conventionalcommits.org/):**
+   * `feat: descripción de nueva funcionalidad`
+   * `fix: corrección de error`
+   * `docs: actualización de documentación`
+   * `chore: configuración o mantenimiento`
 3. **Validar antes de abrir Pull Request:**
    * La infraestructura debe levantar limpia con `make up`.
-   * Los schemas JSON deben ser vÃ¡lidos.
-4. **Abrir Pull Request hacia `develop`** para revisiÃ³n tÃ©cnica por pares.
+   * Los schemas JSON deben ser válidos.
+4. **Abrir Pull Request hacia `develop`** para revisión técnica por pares.
 
 ---
 
-## 9. IA local Qwen2.5, RAG y guardrails (US-28 / US-29 / US-30)
+## 9. Licencia
 
-La capa de IA vive en `api/` y funciona en dos modos:
+Este proyecto está bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más información.
 
-1. **Con Ollama** (`make up-all`): Qwen2.5 responde con function calling sobre herramientas de solo lectura.
-2. **Sin Ollama**: la API devuelve un fallback determinista con las mismas herramientas y metadatos de auditorÃ­a, para que el dashboard nunca quede bloqueado.
+---
 
-### Componentes
+## 10. IA local Qwen2.5, RAG y guardrails (US-28 / US-29 / US-30)
+
+La capa de IA vive en `api/` y tiene dos modos:
+
+1. **Con Ollama** (`make up-all`): Qwen2.5 con function calling sobre herramientas de solo lectura.
+2. **Sin Ollama**: fallback determinista con las mismas herramientas, para que el dashboard y el chat funcionen sin GPU.
 
 | Archivo | Responsabilidad |
 | :--- | :--- |
-| `api/rag_indexer.py` | Indexa `README.md`, `metadata/docs/`, `metadata/catalog.json` y `metadata/glossary.json`. Usa ChromaDB si estÃ¡ instalado; si no, TF-IDF/coseno local. |
-| `api/llm_service.py` | Orquesta el prompt, el contexto RAG, las tool calls de Ollama y el fallback. |
-| `api/sql_guardrails.py` | Valida SQL de solo lectura con AST (`sqlglot`) y fallback regex. |
-| `api/tools.py` | Expone Ãºnicamente `get_catalog_metadata`, `query_metrics` y `query_timeseries`. |
-| `api/query_service.py` | Consulta Postgres (`serving.*`) o genera datos deterministas de demo. |
-
-### Guardrails SQL
-
-Toda sentencia pasa por:
-
-* Solo una sentencia `SELECT` (se permiten CTE).
-* Allowlist de tablas: `serving.ohlcv_reconciled`, `serving.realtime_metrics`, `serving.pipeline_status`, `serving.assets`, catÃ¡logo y telemetrÃ­a autorizada.
-* `LIMIT` obligatorio y `<= 100` (se inyecta `LIMIT 100` si falta).
-* Timeout de 5 segundos en la conexiÃ³n Postgres de solo lectura.
-* Bloqueo de `DROP`, `DELETE`, `UPDATE`, `ALTER`, `INSERT`, `EXEC`, `COPY`, `MERGE`, `pg_sleep`, `pg_read_file`, `dblink`, etc.
-* No existe herramienta de shell, filesystem ni SQL libre.
-
-### RAG
+| `api/rag_indexer.py` | Indexa README, `metadata/docs/`, `metadata/catalog.json` y `metadata/glossary.json`. ChromaDB opcional; TF-IDF local si no está instalado. |
+| `api/llm_service.py` | Prompt + contexto RAG + tool calls de Ollama + fallback. |
+| `api/sql_guardrails.py` | SELECT-only, allowlist, `LIMIT <= 100`, timeout 5s, bloqueo de DDL/EXEC/funciones peligrosas. |
+| `api/tools.py` | Solo `get_catalog_metadata`, `query_metrics`, `query_timeseries`. Sin shell ni SQL libre. |
 
 ```bash
-# Fallback local (sin dependencias extra)
-make rag-index
-# o:
-python -m api.rag_indexer --rebuild
-
-# Backend Chroma opcional
-pip install -r api/requirements-llm.txt
-python -m api.rag_indexer --rebuild
+make rag-index                 # reconstruye metadata/rag_index.json
+make up-all                    # Ollama + ollama-init (pull del modelo)
+pip install -r api/requirements-llm.txt   # ChromaDB opcional
+make test                      # 35 tests
 ```
 
-El Ã­ndice se guarda en `metadata/rag_index.json` (o en `metadata/rag_index.chroma/` con ChromaDB). La respuesta del chat cita las fuentes recuperadas.
+## 11. Dashboard y API de mercado
 
-### Levantar Ollama + Qwen2.5
+El frontend se sirve en `http://localhost:8000/` y consume:
 
-```bash
-make up-all
-# El servicio ollama-init descarga OLLAMA_MODEL (qwen2.5:3b-instruct por defecto).
-curl http://localhost:11434/api/tags
-```
+- `GET /api/market/assets`
+- `GET /api/market/ohlcv?symbol=&interval=&limit=`
+- `GET /api/market/metrics?symbol=&window=`
+- `GET /api/market/pipeline`
+- `POST /api/chat` y `GET /api/chat/stream` (SSE)
 
-Si no hay GPU/RAM suficiente, la API sigue funcionando con el fallback de herramientas. El panel de chat muestra el estado de la respuesta y los badges de fuente, corte y disclaimer.
+Incluye velas OHLCV + volumen en Canvas, crosshair, KPIs, polling cada 5s, panel de salud Kafka/Spark/Airflow/MinIO/DLQ con alerta > 60s y chat con fuentes, corte, SQL y disclaimer.
 
----
-
-## 10. Dashboard y API (US-23 / US-24 / US-30)
-
-El frontend estÃ¡ en `frontend/` y se sirve desde la misma FastAPI en `http://localhost:8000/`.
-
-* Selector de activo (`BTCUSDT`, `ETHUSDT`, `SOLUSDT`) y exchange.
-* Timeframes `1m`, `5m`, `15m`, `1h`, `1d`.
-* Velas OHLCV + volumen dibujadas en Canvas (sin librerÃ­as externas), crosshair y tooltip.
-* KPIs: precio actual, retorno 24h, volumen 24h y VWAP.
-* Polling cada 5 segundos y etiqueta `Ãšltima actualizaciÃ³n: HH:MM:SS UTC`.
-* Panel colapsable de salud: Kafka, Spark, Airflow, MinIO y DLQ. Se marca alerta si la frescura/lag supera 60 segundos.
-* Chat lateral conectado a **SSE** (`/api/chat/stream`) con fallback a `POST /api/chat`; renderiza fuentes, fecha de corte, SQL de trazabilidad y disclaimer.
-
-### Endpoints
-
-| MÃ©todo | Ruta | DescripciÃ³n |
-| :--- | :--- | :--- |
-| `GET` | `/api/health` | Salud de API, Postgres, RAG, Ollama. |
-| `GET` | `/api/assets` | SÃ­mbolos y fuentes disponibles. |
-| `GET` | `/api/ohlcv?symbol=&interval=&limit=` | Velas OHLCV validadas. |
-| `GET` | `/api/metrics?symbol=&window=` | Retorno, volumen, VWAP y varianza. |
-| `GET` | `/api/pipeline/status` | TelemetrÃ­a Kafka/Spark/Airflow/MinIO/DLQ. |
-| `POST` | `/api/chat` | Consulta al asistente con guardrails y RAG. |
-| `GET` | `/api/chat/stream` | Misma consulta en SSE. |
-| `GET` | `/api/rag/status` | Estado del Ã­ndice RAG. |
-
-### Ejecutar sin Docker
-
-```bash
-pip install -r api/requirements.txt
-python -m api.rag_indexer --rebuild
-uvicorn api.main:app --reload --port 8000
-```
-
-AbrÃ­ `http://localhost:8000`. Sin Postgres/MinIO/Ollama la API usa datos deterministas de demo, por lo que el dashboard y el chat son funcionales desde el primer arranque.
-
-### Pruebas
-
-```bash
-make test
-# o:
-python -m pytest -q
-```
-
-La suite cubre guardrails SQL, tools, RAG y el fallback del servicio LLM/API sin requerir Ollama.
-
----
-
-## 11. Licencia
-
-Este proyecto estÃ¡ bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE) para mÃ¡s informaciÃ³n.
+Los endpoints originales de US-22 (`/api/health`, `/api/assets`, `/api/ohlcv`, `/api/metrics`, `/api/pipeline/status`) se mantienen intactos para no romper su contrato ni sus tests.

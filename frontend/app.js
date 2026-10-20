@@ -1,4 +1,4 @@
-"use strict";
+﻿"use strict";
 
 /* ------------------------------------------------------------------ */
 /* State                                                              */
@@ -6,9 +6,9 @@
 
 const TIMEFRAMES = ["1m", "5m", "15m", "1h", "1d"];
 const QUICK_PROMPTS = [
-  "¿Cuál fue el precio máximo de BTC hoy?",
+  "Â¿CuÃ¡l fue el precio mÃ¡ximo de BTC hoy?",
   "Compara el retorno y volumen de BTC vs ETH en 24h",
-  "Consultar catálogo, owner y linaje del dataset OHLCV",
+  "Consultar catÃ¡logo, owner y linaje del dataset OHLCV",
   "Auditar estado del pipeline, lag de Kafka y DLQ",
 ];
 
@@ -74,26 +74,26 @@ const nf0 = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
 function fmtUsd(value, digits = 2) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "â€”";
   if (digits === 0) return `$${nf0.format(n)}`;
   return `$${nf2.format(n)}`;
 }
 
 function fmtNumber(value, digits = 2) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "â€”";
   return digits === 0 ? nf0.format(n) : nf2.format(n);
 }
 
 function fmtPct(value, digits = 2) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "â€”";
   return `${n > 0 ? "+" : ""}${n.toFixed(digits)}%`;
 }
 
 function fmtCompact(value) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "â€”";
   const abs = Math.abs(n);
   if (abs >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
   if (abs >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
@@ -109,7 +109,7 @@ function utcClock(value) {
 
 function utcStamp(value) {
   const date = new Date(value || Date.now());
-  if (Number.isNaN(date.getTime())) return "—";
+  if (Number.isNaN(date.getTime())) return "â€”";
   return `${date.toISOString().slice(0, 10)} ${date.toISOString().slice(11, 19)} UTC`;
 }
 
@@ -225,7 +225,7 @@ function bindControls() {
 }
 
 function updateChartSource() {
-  els.chartSource.textContent = `OHLCV · ${state.exchange === "binance" ? "Binance WebSocket" : "CoinGecko"}`;
+  els.chartSource.textContent = `OHLCV Â· ${state.exchange === "binance" ? "Binance WebSocket" : "CoinGecko"}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -234,7 +234,7 @@ function updateChartSource() {
 
 async function loadAssets() {
   try {
-    const payload = await api("/api/assets");
+    const payload = await api("/api/market/assets");
     state.assets = payload.assets || [];
   } catch {
     state.assets = [];
@@ -248,11 +248,11 @@ async function loadMarket() {
     interval: state.interval,
     limit: "96",
   });
-  els.chartStatus.textContent = "Actualizando…";
+  els.chartStatus.textContent = "Actualizandoâ€¦";
 
   const [ohlcv, metrics] = await Promise.all([
-    api(`/api/ohlcv?${query.toString()}`),
-    api(`/api/metrics?symbol=${encodeURIComponent(state.symbol)}&window=24h`),
+    api(`/api/market/ohlcv?${query.toString()}`),
+    api(`/api/market/metrics?symbol=${encodeURIComponent(state.symbol)}&window=24h`),
   ]);
 
   state.candles = ohlcv.candles || [];
@@ -276,24 +276,24 @@ function updateMarketUi() {
   els.chartSymbol.textContent = state.symbol;
   els.chartInterval.textContent = state.interval;
   updateChartSource();
-  els.chartStatus.textContent = `${state.candles.length} velas · polling 5s`;
+  els.chartStatus.textContent = `${state.candles.length} velas Â· polling 5s`;
   els.freshness.textContent = `Frescura ${freshness.toFixed(1)}s`;
   els.freshness.className = freshness > 60 ? "badge-bad" : "muted";
   els.chartEmpty.classList.toggle("hidden", state.candles.length > 0);
-  els.lastUpdated.textContent = `Última actualización: ${utcClock(state.lastUpdated)} UTC`;
-  els.streamBadge.textContent = "● STREAMING ACTIVO";
+  els.lastUpdated.textContent = `Ãšltima actualizaciÃ³n: ${utcClock(state.lastUpdated)} UTC`;
+  els.streamBadge.textContent = "â— STREAMING ACTIVO";
   els.streamBadge.className = "badge badge-ok";
 
   els.kpis.innerHTML = `
     <article class="kpi">
       <span class="kpi-label">Precio actual</span>
       <span class="kpi-value">${fmtUsd(current)}</span>
-      <span class="kpi-hint">${last ? `Último close ${fmtUsd(last.close)}` : "Sin datos"}</span>
+      <span class="kpi-hint">${last ? `Ãšltimo close ${fmtUsd(last.close)}` : "Sin datos"}</span>
     </article>
     <article class="kpi">
       <span class="kpi-label">Retorno 24h</span>
       <span class="kpi-value ${return24 >= 0 ? "up" : "down"}">${fmtPct(return24)}</span>
-      <span class="kpi-hint">Ventana móvil 1h</span>
+      <span class="kpi-hint">Ventana mÃ³vil 1h</span>
     </article>
     <article class="kpi">
       <span class="kpi-label">Volumen 24h</span>
@@ -312,10 +312,10 @@ function updateMarketUi() {
 
 async function loadPipeline() {
   try {
-    state.pipeline = await api("/api/pipeline/status");
+    state.pipeline = await api("/api/market/pipeline");
     renderPipeline();
   } catch {
-    els.pipelineBadge.textContent = "● SIN TELEMETRÍA";
+    els.pipelineBadge.textContent = "â— SIN TELEMETRÃA";
     els.pipelineBadge.className = "badge badge-bad";
   }
 }
@@ -327,7 +327,7 @@ function renderPipeline() {
   const freshness = Number(p.freshness_seconds ?? p.kafka?.freshness_seconds ?? 0);
   const alert = lag > 60 || freshness > 60;
 
-  els.pipelineBadge.textContent = alert ? "● ALERTA" : "● OPERATIVO";
+  els.pipelineBadge.textContent = alert ? "â— ALERTA" : "â— OPERATIVO";
   els.pipelineBadge.className = `badge ${alert ? "badge-bad" : "badge-ok"}`;
   els.pipelineFreshness.textContent = `Frescura ${freshness.toFixed(1)}s`;
   els.pipelineFreshness.className = alert ? "badge-bad" : "muted";
@@ -335,12 +335,12 @@ function renderPipeline() {
   const rows = [
     {
       label: "Kafka Ingestion",
-      value: `ACTIVO (Topics: ${(p.kafka?.topics || ["market.events"]).join(", ")} · Lag: ${lag})`,
+      value: `ACTIVO (Topics: ${(p.kafka?.topics || ["market.events"]).join(", ")} Â· Lag: ${lag})`,
       alert: lag > 60,
     },
     {
       label: "Spark Streaming",
-      value: `PROCESANDO (Ventana ${p.spark?.window || "2s"} · Watermark ${p.spark?.watermark || "5s"})`,
+      value: `PROCESANDO (Ventana ${p.spark?.window || "2s"} Â· Watermark ${p.spark?.watermark || "5s"})`,
       alert: p.spark?.status !== "PROCESSING",
     },
     {
@@ -365,7 +365,7 @@ function renderPipeline() {
       (row) => `
         <div class="pipeline-row ${row.alert ? "alert" : ""}">
           <span class="pr-label">${escapeHtml(row.label)}</span>
-          <span class="pr-value"><span class="dot">●</span> ${escapeHtml(row.value)}</span>
+          <span class="pr-value"><span class="dot">â—</span> ${escapeHtml(row.value)}</span>
         </div>
       `,
     )
@@ -376,11 +376,11 @@ async function refresh() {
   try {
     await Promise.all([loadMarket(), loadPipeline()]);
     state.online = true;
-    els.streamBadge.textContent = "● STREAMING ACTIVO";
+    els.streamBadge.textContent = "â— STREAMING ACTIVO";
     els.streamBadge.className = "badge badge-ok";
   } catch (error) {
     state.online = false;
-    els.streamBadge.textContent = "● SIN CONEXIÓN";
+    els.streamBadge.textContent = "â— SIN CONEXIÃ“N";
     els.streamBadge.className = "badge badge-bad";
     els.chartStatus.textContent = "Error de feed";
     toast(`No se pudo actualizar el mercado: ${error.message}`);
@@ -609,7 +609,7 @@ function renderMarkdown(text) {
   html = html.replace(/^###\s+(.*)$/gm, "<strong>$1</strong>");
   html = html.replace(/^##\s+(.*)$/gm, "<strong>$1</strong>");
   html = html.replace(/^#\s+(.*)$/gm, "<strong>$1</strong>");
-  html = html.replace(/(^|\n)[-*]\s+(.*?)(?=\n|$)/g, "$1• $2");
+  html = html.replace(/(^|\n)[-*]\s+(.*?)(?=\n|$)/g, "$1â€¢ $2");
   html = html.replace(/\n/g, "<br>");
   return html;
 }
@@ -619,7 +619,7 @@ function appendMessage(role, content) {
   wrapper.className = `msg ${role}`;
   const roleLabel = document.createElement("span");
   roleLabel.className = "msg-role";
-  roleLabel.textContent = role === "user" ? "Tú" : "IQ Analyzer";
+  roleLabel.textContent = role === "user" ? "TÃº" : "IQ Analyzer";
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   if (role === "user") {
@@ -679,7 +679,7 @@ function renderAssistantMeta(bubble, meta) {
   const disclaimer = document.createElement("div");
   disclaimer.className = "disclaimer";
   disclaimer.textContent =
-    meta.disclaimer || "Información exclusivamente referencial. No constituye asesoramiento financiero.";
+    meta.disclaimer || "InformaciÃ³n exclusivamente referencial. No constituye asesoramiento financiero.";
   if (!answerText.toLowerCase().includes(disclaimer.textContent.toLowerCase())) {
     bubble.append(disclaimer);
   }
@@ -689,7 +689,7 @@ async function sendChat(message) {
   if (state.chatBusy) return;
   state.chatBusy = true;
   els.chatSend.disabled = true;
-  els.chatStatus.textContent = "Consultando Qwen2.5…";
+  els.chatStatus.textContent = "Consultando Qwen2.5â€¦";
   appendMessage("user", message);
   const typing = appendTyping();
 
@@ -841,5 +841,5 @@ async function boot() {
 
 boot().catch((error) => {
   toast(`No se pudo inicializar el dashboard: ${error.message}`);
-  els.chartStatus.textContent = "Error de inicialización";
+  els.chartStatus.textContent = "Error de inicializaciÃ³n";
 });

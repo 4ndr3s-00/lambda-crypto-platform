@@ -1,0 +1,111 @@
+{
+  "glossary": {
+    "guid": "-100",
+    "name": "CryptoFinance_Enterprise_Glossary",
+    "shortDescription": "Glosario Empresarial Unificado de Mercados Financieros y Criptoactivos",
+    "longDescription": "Definición canónica y estandarizada de conceptos de negocio, métricas analíticas, modelos temporales y reglas operativas para la plataforma Lambda de datos financieros.",
+    "usage": "Gobernanza corporativa, catalogación de datos, auditoría de cumplimiento y referencia semántica para analistas, ingenieros y modelos LLM (Qwen).",
+    "language": "es"
+  },
+  "terms": [
+    {
+      "name": "Vela_Japonesa_OHLCV",
+      "displayName": "Vela Japonesa (OHLCV)",
+      "shortDescription": "Representación agregada de la acción del precio y volumen en una ventana temporal.",
+      "longDescription": "Estructura de datos que resume las operaciones de mercado en un intervalo temporal específico (ej. 1m, 5m, 1h, 1d). Contiene cinco variables fundamentales: Open (primer precio), High (precio máximo alcanzado), Low (precio mínimo alcanzado), Close (último precio) y Volume (volumen acumulado de activos transaccionados).",
+      "formula": "OHLCV = {open: first_by(price, event_time), high: max(price), low: min(price), close: last_by(price, event_time), volume: sum(quantity)}",
+      "categories": ["Metricas_Mercado", "Series_Temporales"],
+      "classifications": ["Datos_Publicos_Mercado"],
+      "steward": "Diego (Speed Layer & Governance Lead)",
+      "examples": "Vela BTCUSDT de 1m: Open=67100, High=67250, Low=67080, Close=67200, Volume=15.4 BTC."
+    },
+    {
+      "name": "Precio_de_Cierre",
+      "displayName": "Precio de Cierre (Close Price)",
+      "shortDescription": "Último precio de transacción ejecutado en una ventana temporal dada.",
+      "longDescription": "Precio final al que se concretó una transacción dentro del intervalo de tiempo evaluado. En la capa Speed (streaming) actúa como cotización provisional de tiempo real; en la capa Batch representa el valor consolidado definitivo inmutable.",
+      "formula": "close = max_by(price, event_time) dentro de [window_start, window_end)",
+      "categories": ["Metricas_Mercado", "Precios"],
+      "classifications": ["Datos_Publicos_Mercado"],
+      "steward": "Diego (Speed Layer & Governance Lead)",
+      "examples": "Para una vela horaria entre 14:00 y 15:00 UTC, el precio del último trade registrado a las 14:59:59.850 UTC."
+    },
+    {
+      "name": "Volumen_Ponderado",
+      "displayName": "Volumen Ponderado / VWAP",
+      "shortDescription": "Volumen acumulado ponderado por precio durante una ventana de negociación.",
+      "longDescription": "Métrica financiera que refleja el ratio entre el valor monetario total negociado y el volumen total de activos intercambiados en el periodo. Permite evaluar si los grandes volúmenes se negociaron a precios superiores o inferiores al promedio del mercado.",
+      "formula": "VWAP = sum(price * quantity) / sum(quantity)",
+      "categories": ["Metricas_Mercado", "Indicadores_Avanzados"],
+      "classifications": ["Datos_Publicos_Mercado"],
+      "steward": "Diego (Speed Layer & Governance Lead)",
+      "examples": "VWAP de BTCUSDT en ventana de 5 minutos = $67,145.20 frente a un último precio de $67,200.00."
+    },
+    {
+      "name": "Event_Time",
+      "displayName": "Event-Time (Marca Temporal de Evento)",
+      "shortDescription": "Instante exacto en que ocurrió la transacción o tick en el exchange de origen.",
+      "longDescription": "Marca temporal formal en UTC asignada por el proveedor o exchange en el momento exacto en que se ejecutó la orden en el motor de emparejamiento. Es la dimensión temporal gobernante de la Arquitectura Lambda, desacoplada del momento de ingesta en Kafka (ingestion_time) o de procesamiento en Spark.",
+      "formula": "event_time (ISO-8601 UTC timestamp: YYYY-MM-DDTHH:MM:SS.sssZ)",
+      "categories": ["Modelado_Temporal", "Contratos_Datos"],
+      "classifications": ["Datos_Publicos_Mercado"],
+      "steward": "Diego (Speed Layer & Governance Lead)",
+      "examples": "2026-10-19T20:30:15.124Z generado por Binance Matching Engine."
+    },
+    {
+      "name": "Retorno_Porcentual",
+      "displayName": "Retorno Porcentual (Percentage Return)",
+      "shortDescription": "Variación porcentual del precio entre dos observaciones consecutivas.",
+      "longDescription": "Rendimiento relativo de un activo financiero a lo largo de un intervalo temporal. Permite comparar la rentabilidad y volatilidad entre activos de distintas magnitudes de precio. En la plataforma se calculan tanto retornos aritméticos simples como retornos logarítmicos aditivos.",
+      "formula": "Retorno_Simple = ((Close_t - Close_{t-1}) / Close_{t-1}) * 100 ; Retorno_Log = ln(Close_t / Close_{t-1})",
+      "categories": ["Metricas_Mercado", "Rendimiento"],
+      "classifications": ["Datos_Publicos_Mercado"],
+      "steward": "Diego (Speed Layer & Governance Lead)",
+      "examples": "Variación porcentual en 5 minutos: +0.45% para ETHUSDT."
+    },
+    {
+      "name": "Watermark",
+      "displayName": "Watermark (Marca de Agua de Streaming)",
+      "shortDescription": "Cota temporal para gestionar la tolerancia a datos desordenados y purgar estado.",
+      "longDescription": "Mecanismo de Spark Structured Streaming que define el umbral temporal máximo admisible para datos tardíos (ej. 2 minutos detrás del event_time máximo observado). Los eventos que llegan con una marca anterior al watermark son descartados de las agregaciones, permitiendo a los ejecutores desalojar el estado en memoria y evitar fugas OOM.",
+      "formula": "Watermark = max(event_time) - delay_threshold",
+      "categories": ["Modelado_Temporal", "Streaming_Infra"],
+      "classifications": ["Datos_Publicos_Mercado"],
+      "steward": "Diego (Speed Layer & Governance Lead)",
+      "examples": "withWatermark('event_time', '2 minutes') descarta eventos con event_time inferior a T_max - 120s."
+    },
+    {
+      "name": "Slippage",
+      "displayName": "Slippage (Deslizamiento de Ejecución)",
+      "shortDescription": "Diferencia entre el precio esperado de una orden y el precio real de ejecución.",
+      "longDescription": "Discrepancia entre la cotización observada al enviar una orden y el precio medio al que efectivamente se ejecuta. Ocurre comúnmente en mercados con alta volatilidad o cuando el tamaño de la orden consume múltiples niveles de profundidad en el libro de órdenes (market depth).",
+      "formula": "Slippage = |Precio_Ejecucion - Precio_Solicitado| / Precio_Solicitado",
+      "categories": ["Microestructura_Mercado", "Riesgo_Operativo"],
+      "classifications": ["Datos_Publicos_Mercado"],
+      "steward": "Diego (Speed Layer & Governance Lead)",
+      "examples": "Orden de compra enviada a $67,000 ejecutada a $67,025 (slippage de 0.037%)."
+    },
+    {
+      "name": "Spread",
+      "displayName": "Spread Bid-Ask (Diferencial de Precios)",
+      "shortDescription": "Diferencia entre la mejor oferta de compra (Bid) y la mejor oferta de venta (Ask).",
+      "longDescription": "Medida estándar de liquidez de un mercado financiero. Cuanto menor sea el spread, mayor es la liquidez del par y menor el coste de transacción inmediato para los participantes del mercado.",
+      "formula": "Spread_Absoluto = Best_Ask - Best_Bid ; Spread_Relativo = (Best_Ask - Best_Bid) / Mid_Price",
+      "categories": ["Microestructura_Mercado", "Liquidez"],
+      "classifications": ["Datos_Publicos_Mercado"],
+      "steward": "Diego (Speed Layer & Governance Lead)",
+      "examples": "BTCUSDT con Best Ask = $67,001.00 y Best Bid = $67,000.50 -> Spread = $0.50."
+    },
+    {
+      "name": "Datos_Provisionales_Speed",
+      "displayName": "Datos Provisionales de Speed Layer",
+      "shortDescription": "Agregaciones de baja latencia sujetas a reconciliación con la capa Batch.",
+      "longDescription": "Resultados de analítica generados en tiempo real por Spark Streaming marcados con is_provisional = true. Sirven para consumo inmediato por el Frontend y Serving API, pero son posteriormente reemplazados por el cómputo exhaustivo e inmutable de la capa Batch.",
+      "formula": "is_provisional = TRUE",
+      "categories": ["Arquitectura_Lambda", "Serving_Layer"],
+      "classifications": ["Datos_Provisionales_Speed"],
+      "steward": "Diego (Speed Layer & Governance Lead)",
+      "examples": "Métricas en topic market.metrics y tabla serving.realtime_metrics."
+    }
+  ]
+}

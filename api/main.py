@@ -1,16 +1,13 @@
-"""FastAPI serving layer for the Lambda crypto platform.
+"""
+FastAPI Serving Layer API para la Plataforma Lambda.
 
-Endpoints:
-    GET  /api/health
-    GET  /api/assets
-    GET  /api/ohlcv
-    GET  /api/metrics
-    GET  /api/pipeline/status
-    POST /api/chat
-    GET  /api/chat/stream (SSE)
-    GET  /api/rag/status
+Integra:
+- US-22: Serving REST API (health, assets, OHLCV, metrics, pipeline, guardrails).
+- US-28/29/30: Qwen2.5 local, RAG, tools de solo lectura y chat SSE.
+- US-23/24: endpoints de mercado y telemetría para el dashboard.
 
-The frontend is mounted at `/` from frontend/ (dev) or /app/static (Docker).
+Los endpoints originales de US-22 conservan sus contratos; el dashboard y el
+chat consumen los adaptadores `/api/market/*` y `/api/chat*`.
 """
 
 from __future__ import annotations
@@ -18,190 +15,275 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
-from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Any, AsyncIterator
+from datetime import datetime, timezone
+from typing import Any, AsyncIterator, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import get_settings
-from .llm_service import LLMService
-from .market_data import MarketDataError
-from .models import (
-    AssetsResponse,
-    ChatRequest,
-    ChatResponse,
-    HealthResponse,
-    HealthServices,
-    MetricsResponse,
-    OHLCVResponse,
-    PipelineStatusResponse,
-)
-from .query_service import QueryService, QueryServiceError
-from .rag_indexer import RagIndex, build_default_index
+try:  # package imports (pytest -m api.main)
+    from .config import get_settings
+    from .llm_service import LLMService
+    from .models import (
+        AssetsResponse as MarketAssetsResponse,
+        ChatRequest,
+        ChatResponse,
+        MetricsResponse as MarketMetricsResponse,
+        OHLCVResponse as MarketOHLCVResponse,
+        PipelineStatusResponse as MarketPipelineStatusResponse,
+    )
+    from .query_service import QueryService
+    from .rag_indexer import RagIndex, build_default_index
+    from .schemas import (
+        AssetsResponse,
+        HealthResponse,
+        IntervalEnum,
+        MetricsResponse,
+        OHLCVResponse,
+        PipelineStatusResponse,
+    )
+    from .sql_guardrails import sanitize_symbol
+except ImportError:  # Docker / uvicorn main:app
+    from config import get_settings
+    from llm_service import LLMService
+    from models import (
+        AssetsResponse as MarketAssetsResponse,
+        ChatRequest,
+        ChatResponse,
+        MetricsResponse as MarketMetricsResponse,
+        OHLCVResponse as MarketOHLCVResponse,
+        PipelineStatusResponse as MarketPipelineStatusResponse,
+    )
+    from query_service import QueryService
+    from rag_indexer import RagIndex, build_default_index
+    from schemas import (
+        AssetsResponse,
+        HealthResponse,
+        IntervalEnum,
+        MetricsResponse,
+        OHLCVResponse,
+        PipelineStatusResponse,
+    )
+    from sql_guardrails import sanitize_symbol
 
-LOGGER = logging.getLogger("iq_analyzer.api")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    settings = get_settings()
-    query_service = QueryService(settings)
-    rag_index = RagIndex(settings.rag_index_path, settings.rag_docs_dir, settings.glossary_path)
-    try:
-        if not rag_index.index_path.exists():
-            build_default_index()
-        rag_index.ensure_index()
-    except Exception as exc:  # noqa: BLE001 - RAG is optional for API boot
-        LOGGER.warning("No se pudo inicializar el índice RAG: %s", exc)
-
-    app.state.settings = settings
-    app.state.query_service = query_service
-    app.state.rag_index = rag_index
-    app.state.llm_service = LLMService(query_service, rag_index, settings)
-    LOGGER.info("Serving API lista · model=%s · db=%s", settings.ollama_model, query_service.database_available())
-    yield
-
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger("ServingAPI")
 
 app = FastAPI(
-    title="IQ Analyzer Serving API",
+    title="Plataforma Lambda - Serving REST API",
     version="6.0.0",
-    description="Serving layer Lambda + Qwen2.5 + guardrails SQL + dashboard en vivo",
-    lifespan=lifespan,
+    description="""
+API REST de la Serving Layer para la Plataforma de Datos Financieros y Criptomonedas.
+Incluye mercado OHLCV, métricas, telemetría, dashboard, Qwen2.5 local, RAG y guardrails SQL.
+    """,
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
-_settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=list(_settings.cors_origins),
-    allow_credentials=False,
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
+# ---------------------------------------------------------------------------
+# Servicios
+# ---------------------------------------------------------------------------
 
-def _query(request: Request) -> QueryService:
-    return request.app.state.query_service
-
-
-def _rag(request: Request) -> RagIndex:
-    return request.app.state.rag_index
-
-
-def _llm(request: Request) -> LLMService:
-    return request.app.state.llm_service
-
-
-def _market_error(exc: Exception) -> HTTPException:
-    return HTTPException(status_code=422, detail=str(exc))
+query_service = QueryService()
+_settings = get_settings()
+rag_index = RagIndex(_settings.rag_index_path, _settings.rag_docs_dir, _settings.glossary_path)
+llm_service = LLMService(query_service, rag_index, _settings)
+app.state.query_service = query_service
+app.state.rag_index = rag_index
+app.state.llm_service = llm_service
 
 
-@app.get("/api/health", response_model=HealthResponse)
-async def health(request: Request) -> HealthResponse:
-    started = time.perf_counter()
-    query_service = _query(request)
-    llm = _llm(request)
-    rag = _rag(request)
+# ---------------------------------------------------------------------------
+# Manejo de errores (US-22)
+# ---------------------------------------------------------------------------
 
-    llm_health: dict[str, Any]
-    try:
-        llm_health = await llm.health()
-    except Exception as exc:  # noqa: BLE001
-        llm_health = {"status": "DOWN", "error": str(exc)}
 
-    rag_status = rag.status()
-    db_status = "UP" if query_service.database_available() else "FALLBACK"
-
-    services = HealthServices(
-        serving_api="UP",
-        postgres=db_status,
-        minio="FALLBACK",
-        ollama=str(llm_health.get("status", "DOWN")),
-        rag="READY" if rag_status.get("ready") else "MISSING",
-    )
-    status = "ok" if services.serving_api == "UP" and services.rag == "READY" else "degraded"
-    return HealthResponse(
-        status=status,
-        application="IQ ANALYZER",
-        version=request.app.state.settings.version,
-        environment=request.app.state.settings.environment,
-        services=services,
-        serving_latency_ms=round((time.perf_counter() - started) * 1000, 2),
-        timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
+    logger.warning("Validación fallida en %s: %s", request.url.path, exc)
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "error": "Bad Request",
+            "detail": str(exc),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
     )
 
 
-@app.get("/api/assets", response_model=AssetsResponse)
-async def assets(request: Request) -> AssetsResponse:
-    rows = _query(request).get_assets()
-    return AssetsResponse(
-        assets=rows,
-        cutoff_time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    logger.warning("Parámetro inválido en %s: %s", request.url.path, exc.errors())
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "error": "Unprocessable Entity",
+            "detail": exc.errors(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
     )
 
 
-@app.get("/api/ohlcv", response_model=OHLCVResponse)
-async def ohlcv(
-    request: Request,
-    symbol: str = Query(default="BTCUSDT", description="BTCUSDT, ETHUSDT o SOLUSDT"),
-    interval: str = Query(default="15m", description="1m, 5m, 15m, 1h, 4h, 1d, 7d"),
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.error("Error no controlado en %s: %s", request.url.path, exc, exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "error": "Internal Server Error",
+            "detail": "Ocurrió un error interno en el servicio de consulta.",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# US-22: endpoints originales (contratos intactos)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/health", response_model=HealthResponse, tags=["Salud y Diagnóstico"])
+def get_health() -> dict[str, Any]:
+    dependencies = query_service.check_dependencies()
+    overall_status = "healthy"
+    if any(state == "disconnected" for state in dependencies.values()):
+        overall_status = "degraded"
+    return {
+        "status": overall_status,
+        "service": "serving-api",
+        "architecture": "Lambda (Batch + Speed + Serving)",
+        "dependencies": dependencies,
+        "timestamp_utc": datetime.now(timezone.utc),
+    }
+
+
+@app.get("/api/assets", response_model=AssetsResponse, tags=["Catálogo de Mercado"])
+def get_assets(
+    exchange: Optional[str] = Query(None),
+    status_filter: Optional[str] = Query(None, alias="status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    offset = (page - 1) * page_size
+    return query_service.get_assets(exchange=exchange, status=status_filter, limit=page_size, offset=offset)
+
+
+@app.get("/api/ohlcv", response_model=OHLCVResponse, tags=["Series Financieras"])
+def get_ohlcv(
+    symbol: str = Query(...),
+    interval: IntervalEnum = Query(IntervalEnum.ONE_HOUR),
+    start_time: Optional[datetime] = Query(None),
+    end_time: Optional[datetime] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
+) -> dict[str, Any]:
+    clean_symbol = sanitize_symbol(symbol)
+    return query_service.get_ohlcv(
+        symbol=clean_symbol,
+        interval=interval.value,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+    )
+
+
+@app.get("/api/metrics", response_model=MetricsResponse, tags=["Métricas en Tiempo Real"])
+def get_metrics(symbol: Optional[str] = Query(None)) -> dict[str, Any]:
+    clean_symbol = sanitize_symbol(symbol) if symbol else None
+    return query_service.get_metrics(symbol=clean_symbol)
+
+
+@app.get("/api/pipeline/status", response_model=PipelineStatusResponse, tags=["Observabilidad y Operaciones"])
+def get_pipeline_status() -> dict[str, Any]:
+    return query_service.get_pipeline_status()
+
+
+# ---------------------------------------------------------------------------
+# US-23 / US-24: adaptadores para el dashboard
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/market/assets", response_model=MarketAssetsResponse, tags=["Dashboard"])
+def get_market_assets() -> MarketAssetsResponse:
+    assets = query_service.get_market_assets()
+    return MarketAssetsResponse(
+        assets=assets,
+        cutoff_time=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    )
+
+
+@app.get("/api/market/ohlcv", response_model=MarketOHLCVResponse, tags=["Dashboard"])
+def get_market_ohlcv(
+    symbol: str = Query(default="BTCUSDT"),
+    interval: str = Query(default="15m"),
     limit: int = Query(default=96, ge=1, le=500),
-) -> OHLCVResponse:
+) -> MarketOHLCVResponse:
     try:
-        payload = _query(request).get_ohlcv(symbol, interval, limit)
-        return OHLCVResponse.model_validate(payload)
-    except MarketDataError as exc:
-        raise _market_error(exc) from exc
+        payload = query_service.get_market_ohlcv(symbol, interval, limit)
+        return MarketOHLCVResponse.model_validate(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.get("/api/metrics", response_model=MetricsResponse)
-async def metrics(
-    request: Request,
+@app.get("/api/market/metrics", response_model=MarketMetricsResponse, tags=["Dashboard"])
+def get_market_metrics(
     symbol: str = Query(default="BTCUSDT"),
     window: str = Query(default="24h", pattern="^(1h|4h|24h|7d)$"),
-) -> MetricsResponse:
+) -> MarketMetricsResponse:
     try:
-        payload = _query(request).get_metrics(symbol, window=window)
-        return MetricsResponse.model_validate(payload)
-    except MarketDataError as exc:
-        raise _market_error(exc) from exc
+        payload = query_service.get_market_metrics(symbol, window=window)
+        return MarketMetricsResponse.model_validate(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.get("/api/pipeline/status", response_model=PipelineStatusResponse)
-async def pipeline_status(request: Request) -> PipelineStatusResponse:
-    payload = _query(request).get_pipeline_status()
-    return PipelineStatusResponse.model_validate(payload)
+@app.get("/api/market/pipeline", response_model=MarketPipelineStatusResponse, tags=["Dashboard"])
+def get_market_pipeline() -> MarketPipelineStatusResponse:
+    payload = query_service.get_market_pipeline_status()
+    return MarketPipelineStatusResponse.model_validate(payload)
 
 
-@app.get("/api/catalog/{dataset}")
-async def catalog(request: Request, dataset: str = "market_ohlcv") -> dict[str, Any]:
-    return _query(request).get_catalog_metadata(dataset)
+# ---------------------------------------------------------------------------
+# US-28 / US-29 / US-30: catálogo, RAG y chat
+# ---------------------------------------------------------------------------
 
 
-@app.get("/api/rag/status")
-async def rag_status(request: Request) -> dict[str, Any]:
-    return _rag(request).status()
+@app.get("/api/catalog/{dataset}", tags=["Gobierno"])
+def get_catalog(dataset: str = "market_ohlcv") -> dict[str, Any]:
+    return query_service.get_catalog_metadata(dataset)
 
 
-@app.post("/api/rag/reindex")
-async def rag_reindex(request: Request, force: bool = Query(default=False)) -> dict[str, Any]:
+@app.get("/api/rag/status", tags=["IA"])
+def get_rag_status() -> dict[str, Any]:
+    return rag_index.status()
+
+
+@app.post("/api/rag/reindex", tags=["IA"])
+def reindex_rag(force: bool = Query(default=False)) -> dict[str, Any]:
     try:
         return build_default_index(force=force)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"no se pudo reindexar: {exc}") from exc
 
 
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: Request, body: ChatRequest) -> ChatResponse:
+@app.post("/api/chat", response_model=ChatResponse, tags=["IA"])
+async def chat(body: ChatRequest) -> ChatResponse:
     try:
-        return await _llm(request).answer(body)
-    except Exception as exc:  # noqa: BLE001 - always return a useful error envelope
-        LOGGER.exception("Chat failure")
+        return await llm_service.answer(body)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Chat failure")
         raise HTTPException(status_code=500, detail=f"fallo del asistente: {exc}") from exc
 
 
@@ -213,15 +295,15 @@ def _sse(event: str, payload: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
 
 
-@app.get("/api/chat/stream")
+@app.get("/api/chat/stream", tags=["IA"])
 async def chat_stream(
-    request: Request,
     message: str = Query(min_length=1, max_length=4000),
     symbol: str = Query(default="BTCUSDT"),
     interval: str = Query(default="15m"),
 ) -> StreamingResponse:
-    body = ChatRequest(message=message, symbol=symbol, interval=interval)
-    response = await _llm(request).answer(body)
+    response = await llm_service.answer(
+        ChatRequest(message=message, symbol=symbol, interval=interval)
+    )
 
     async def event_stream() -> AsyncIterator[str]:
         yield _sse(
@@ -251,26 +333,27 @@ async def chat_stream(
 
 
 # ---------------------------------------------------------------------------
-# Static frontend
+# Frontend estático
 # ---------------------------------------------------------------------------
 
-
-def _frontend_dir() -> Path | None:
-    settings = get_settings()
-    for candidate in (settings.frontend_dir, settings.static_dir):
-        if (candidate / "index.html").exists():
+def _frontend_dir() -> Optional[str]:
+    candidates = [
+        os.getenv("FRONTEND_DIR"),
+        os.getenv("STATIC_DIR"),
+        os.path.join(os.path.dirname(__file__), "..", "frontend"),
+        os.path.join(os.path.dirname(__file__), "..", "static"),
+        "/app/static",
+    ]
+    for candidate in candidates:
+        if candidate and os.path.isfile(os.path.join(candidate, "index.html")):
             return candidate
     return None
 
 
 _frontend = _frontend_dir()
-if _frontend is not None:
-    app.mount("/", StaticFiles(directory=str(_frontend), html=True), name="frontend")
+if _frontend:
+    app.mount("/static", StaticFiles(directory=_frontend), name="static")
+    # Sirve index.html, styles.css y app.js en la raíz.
+    app.mount("/", StaticFiles(directory=_frontend, html=True), name="frontend")
 else:
-    LOGGER.warning("No se encontró frontend/index.html; el dashboard no se servirá")
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=True)
+    logger.warning("No se encontró frontend/index.html; el dashboard no se servirá")
