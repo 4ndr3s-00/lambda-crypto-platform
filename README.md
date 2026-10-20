@@ -356,3 +356,41 @@ El frontend se sirve en `http://localhost:8000/` y consume:
 Incluye velas OHLCV + volumen en Canvas, crosshair, KPIs, polling cada 5s, panel de salud Kafka/Spark/Airflow/MinIO/DLQ con alerta > 60s y chat con fuentes, corte, SQL y disclaimer.
 
 Los endpoints originales de US-22 (`/api/health`, `/api/assets`, `/api/ohlcv`, `/api/metrics`, `/api/pipeline/status`) se mantienen intactos para no romper su contrato ni sus tests.
+
+## 12. Troubleshooting en Windows
+
+### Scripts `.sh` con CRLF
+Los scripts de `infra/` corren dentro de contenedores Linux. Si un checkout en Windows los convierte a CRLF, `minio-init` y `kafka-init` fallan con `set: pipefail: invalid option name` o `$'\r': command not found`.
+
+Este repo incluye `.gitattributes` con `*.sh text eol=lf`. Si clonaste antes del fix:
+
+```bash
+git add --renormalize .
+git checkout -- .
+# o, si tenés dos2unix:
+dos2unix infra/kafka/*.sh infra/minio/*.sh
+```
+
+### Puerto 8081 ocupado
+Docker Desktop en Windows puede estar usando `8081`. Configurá en `.env`:
+
+```env
+SPARK_WORKER_WEBUI_PORT=8082
+```
+
+y recreá el worker:
+
+```bash
+docker compose -f infra/docker-compose.yml -p infra --env-file .env up -d --force-recreate spark-worker
+```
+
+### “Mi frontend se ve distinto”
+Verificá primero que estén en el mismo commit y en el mismo repo:
+
+```bash
+git log -1 --oneline
+git remote -v
+git branch --show-current
+```
+
+El dashboard de este repo es `frontend/` (HTML/CSS/JS estático) y se sirve en `http://localhost:8000/`. No es el proyecto Next.js `iq-analyzer`: si uno corre ese otro frontend, se ve completamente distinto. Antes del merge del PR #45, `frontend/` estaba vacío en `develop`; un checkout viejo no mostraba el dashboard. También conviene abrir `/` (no `/static/index.html`) y hacer un hard reload para descartar caché.
