@@ -90,3 +90,4 @@ def test_fetch_binance_klines_mocked():
     assert events[1]["price"] == 68550.00
     assert is_valid(events[0]) is True
     assert is_valid(events[1]) is True
+

@@ -19,11 +19,19 @@ from datetime import date, datetime, timedelta, timezone
 
 import boto3
 from botocore.client import Config
-import psycopg2
+try:
+    import psycopg2
+except ImportError:
+    psycopg2 = None
 
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+try:
+    from airflow import DAG
+    from airflow.operators.python import PythonOperator
+    from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+except ImportError:
+    DAG = None
+    PythonOperator = None
+    TriggerDagRunOperator = None
 
 # Asegurar que el directorio de conectores sea importable tanto en Docker como en local
 INGESTION_DIR = os.environ.get("INGESTION_DIR", "/opt/airflow/ingestion")
@@ -239,44 +247,48 @@ def record_audit_log(**context) -> None:
         raise RuntimeError(f"Fallo al registrar auditoría en PostgreSQL: {last_error}")
 
 
-with DAG(
-    dag_id=DAG_ID,
-    description=(
-        "Extracción periódica de datos históricos desde Binance REST API, "
-        "persistencia en MinIO (historical/) y auditoría en PostgreSQL."
-    ),
-    default_args=DEFAULT_ARGS,
-    schedule="0 0 * * *",  # Diario a las 00:00 UTC
-    start_date=datetime(2026, 10, 1),
-    catchup=False,
-    tags=["ingestion", "binance", "historical", "minio", "lambda-architecture"],
-    params={
-        "start_date": None,
-        "symbols": "BTCUSDT,ETHUSDT,SOLUSDT",
-    },
-) as dag:
-
-    extract_and_load_minio = PythonOperator(
-        task_id="extract_and_load_minio",
-        python_callable=run_extract_and_load,
-    )
-
-    log_audit = PythonOperator(
-        task_id="record_pipeline_audit",
-        python_callable=record_audit_log,
-    )
-
-    # Disparar automáticamente el DAG de recálculo batch tras la ingesta exitosa
-    trigger_batch = TriggerDagRunOperator(
-        task_id="trigger_batch_recompute",
-        trigger_dag_id="batch_recompute",
-        conf={
-            "start_date": "{{ ti.xcom_pull(task_ids='extract_and_load_minio')['target_date'] }}",
-            "end_date": "{{ ti.xcom_pull(task_ids='extract_and_load_minio')['target_date'] }}",
+if DAG is not None:
+    with DAG(
+        dag_id=DAG_ID,
+        description=(
+            "Extracción periódica de datos históricos desde Binance REST API, "
+            "persistencia en MinIO (historical/) y auditoría en PostgreSQL."
+        ),
+        default_args=DEFAULT_ARGS,
+        schedule="0 0 * * *",  # Diario a las 00:00 UTC
+        start_date=datetime(2026, 10, 1),
+        catchup=False,
+        tags=["ingestion", "binance", "historical", "minio", "lambda-architecture"],
+        params={
+            "start_date": None,
+            "symbols": "BTCUSDT,ETHUSDT,SOLUSDT",
         },
-        wait_for_completion=False,
-        reset_dag_run=True,
-    )
+    ) as dag:
 
-    # Pipeline de dependencias
-    extract_and_load_minio >> log_audit >> trigger_batch
+        extract_and_load_minio = PythonOperator(
+            task_id="extract_and_load_minio",
+            python_callable=run_extract_and_load,
+        )
+
+        log_audit = PythonOperator(
+            task_id="record_pipeline_audit",
+            python_callable=record_audit_log,
+        )
+
+        # Disparar automáticamente el DAG de recálculo batch tras la ingesta exitosa
+        trigger_batch = TriggerDagRunOperator(
+            task_id="trigger_batch_recompute",
+            trigger_dag_id="batch_recompute",
+            conf={
+                "start_date": "{{ ti.xcom_pull(task_ids='extract_and_load_minio')['target_date'] }}",
+                "end_date": "{{ ti.xcom_pull(task_ids='extract_and_load_minio')['target_date'] }}",
+            },
+            wait_for_completion=False,
+            reset_dag_run=True,
+        )
+
+        # Pipeline de dependencias
+        extract_and_load_minio >> log_audit >> trigger_batch
+else:
+    dag = None
+

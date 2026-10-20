@@ -175,3 +175,4 @@ def extract_daily_market_data(
             all_events.extend(symbol_events)
 
     return all_events
+

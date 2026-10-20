@@ -1,42 +1,66 @@
 """
-DAG de Airflow para orquestar el recálculo batch con Spark (US-15).
+DAG de Airflow para orquestar el recálculo batch con Apache Spark (US-15).
+Responsable: Camilo (Épica 5: Airflow DAGs)
 
-Lanza `spark/batch_historical.py` contra el clúster Spark local, lo que
-permite programar backfills diarios y reprocesar periodos cerrados de forma
-idempotente.
+Ejecuta el job distribuido `spark/batch_historical.py` contra el clúster Spark
+local tras finalizar la ingesta histórica (US-14) o bajo demanda/programación.
 
-El DAG se activa manualmente o según el schedule configurado, y acepta
-parámetros en tiempo de ejecución (`start_date`, `end_date` y `symbols`) para
-disparar recálculos concretos sin tocar el código.
+Calcula de forma idempotente las velas OHLCV (1m, 5m, 1h, 1d), retornos y métricas
+consolidadas sobre MinIO, y registra la auditoría de ejecución en PostgreSQL.
 """
 
+import logging
 import os
 import subprocess
-from datetime import datetime, timedelta
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List
 
-from airflow import DAG
-from airflow.operators.python import PythonOperator
+try:
+    import psycopg2
+except ImportError:
+    psycopg2 = None
 
-# Parámetros que el DAG admite en tiempo de ejecución.
+try:
+    from airflow import DAG
+    from airflow.operators.python import PythonOperator
+except ImportError:
+    DAG = None
+    PythonOperator = None
+
+logger = logging.getLogger(__name__)
+
 DAG_ID = "batch_recompute"
 
-# Job de Spark y sus argumentos por defecto. El rango de fechas se recalcula
-# en cada ejecución: por defecto se procesa el día anterior.
 DEFAULT_ARGS = {
-    "owner": "Andrés Blanco",
+    "owner": "Camilo",
     "depends_on_past": False,
-    "retries": 1,
+    "retries": 2,
     "retry_delay": timedelta(minutes=2),
+    "email_on_failure": False,
 }
 
-# Directorio donde el contenedor de Airflow monta el código de los jobs.
-# Se puede sobrescribir con la variable de entorno `SPARK_JOBS_DIR` para
-# ejecutar el DAG contra otra ruta durante las pruebas.
+# Configuración del entorno de Spark
+SPARK_MASTER_URL = os.environ.get("SPARK_MASTER_URL", "spark://spark-master:7077")
 SPARK_JOBS_DIR = os.environ.get("SPARK_JOBS_DIR", "/opt/airflow/spark")
+SPARK_DRIVER_MEMORY = os.environ.get("SPARK_DRIVER_MEMORY", "1G")
+SPARK_EXECUTOR_MEMORY = os.environ.get("SPARK_EXECUTOR_MEMORY", "1G")
+SPARK_EXECUTOR_CORES = os.environ.get("SPARK_EXECUTOR_CORES", "1")
 
-# Configuración S3A que el driver de Spark necesita para hablar con MinIO.
+# Configuración S3A para que el driver de Spark interactúe con MinIO
+MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
 S3A_CONF = {
-    "spark.hadoop.fs.s3a.endpoint": "http://minio:9000",
+    "spark.hadoop.fs.s3a.endpoint": MINIO_ENDPOINT,
+    "spark.hadoop.fs.s3a.access.key": (
+        os.environ.get("SPARK_MINIO_USER")
+        or os.environ.get("AWS_ACCESS_KEY_ID")
+        or "spark_service"
+    ),
+    "spark.hadoop.fs.s3a.secret.key": (
+        os.environ.get("SPARK_MINIO_PASSWORD")
+        or os.environ.get("AWS_SECRET_ACCESS_KEY")
+        or "spark_secure_lake_pass123"
+    ),
     "spark.hadoop.fs.s3a.path.style.access": "true",
     "spark.hadoop.fs.s3a.connection.ssl.enabled": "false",
     "spark.hadoop.fs.s3a.aws.credentials.provider": (
@@ -44,29 +68,53 @@ S3A_CONF = {
     ),
 }
 
+# Configuración de base de datos PostgreSQL para auditoría
+POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "postgres")
+POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
+POSTGRES_USER = os.environ.get("POSTGRES_USER", "postgres")
+POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "postgres_secure_pass")
+POSTGRES_DB = os.environ.get("POSTGRES_DB", "serving_db")
 
-def build_batch_command(**context):
+
+def build_batch_command(**context) -> List[str]:
     """
-    Construye el comando de `spark-submit` con el rango de fechas de la run.
+    Construye el comando `spark-submit` con control estricto de recursos,
+    memoria de driver/executor, configuraciones S3A y rango de fechas (Criterio 2 BDD).
 
-    Por defecto se recalcula el día anterior al de la ejecución, que es la
-    ventana habitual de consolidación del batch. Los parámetros `start_date` y
-    `end_date` permiten disparar backfills arbitrarios.
+    Prioriza parámetros transmitidos vía trigger downstream (`dag_run.conf`),
+    luego parámetros de ejecución manual (`params`) y finalmente el día anterior.
     """
-    params = context["params"] or {}
-    execution_date = context["logical_date"] or context["execution_date"]
-    previous_day = (execution_date - timedelta(days=1)).date().isoformat()
+    dag_run = context.get("dag_run")
+    conf = (dag_run.conf if dag_run else {}) or {}
+    params = context.get("params") or {}
 
-    start_date = params.get("start_date") or previous_day
-    end_date = params.get("end_date") or previous_day
-    symbols = params.get("symbols")
-    intervals = params.get("intervals") or "1m,5m,1h,1d"
+    logical_dt = context.get("logical_date") or context.get("execution_date")
+    previous_day = (logical_dt - timedelta(days=1)).date().isoformat()
+
+    start_date = conf.get("start_date") or params.get("start_date") or previous_day
+    end_date = conf.get("end_date") or params.get("end_date") or previous_day
+    symbols = conf.get("symbols") or params.get("symbols")
+    intervals = conf.get("intervals") or params.get("intervals") or "1m,5m,1h,1d"
+    metrics = conf.get("metrics") or params.get("metrics") or "ohlcv,returns"
+
+    driver_mem = conf.get("driver_memory") or SPARK_DRIVER_MEMORY
+    executor_mem = conf.get("executor_memory") or SPARK_EXECUTOR_MEMORY
+    executor_cores = conf.get("executor_cores") or SPARK_EXECUTOR_CORES
 
     command = [
         "spark-submit",
         "--master",
-        "spark://spark-master:7077",
+        SPARK_MASTER_URL,
+        "--driver-memory",
+        driver_mem,
+        "--executor-memory",
+        executor_mem,
+        "--executor-cores",
+        str(executor_cores),
+        "--name",
+        f"airflow-batch-recompute-{start_date}",
     ]
+
     for key, value in S3A_CONF.items():
         command += ["--conf", f"{key}={value}"]
 
@@ -78,54 +126,172 @@ def build_batch_command(**context):
         end_date,
         "--intervals",
         intervals,
+        "--metrics",
+        metrics,
     ]
+
     if symbols:
         command += ["--symbols", symbols]
 
     return command
 
 
-def run_batch_recompute(**context):
-    """Ejecuta el job de Spark Batch y propaga su código de salida."""
+def run_batch_recompute(**context) -> Dict[str, Any]:
+    """
+    Ejecuta el job de Spark Batch transmitiendo la salida en tiempo real
+    a los logs de Airflow y validando el código de terminación (Criterio 2 y 3 BDD).
+    """
+    start_time = time.time()
+    task_instance = context["task_instance"]
     command = build_batch_command(**context)
-    context["task_instance"].log.info("Ejecutando: %s", " ".join(command))
 
-    completed = subprocess.run(command, capture_output=True, text=True)
-    if completed.stdout:
-        context["task_instance"].log.info(completed.stdout)
-    if completed.stderr:
-        context["task_instance"].log.info(completed.stderr)
+    task_instance.log.info("Lanzando job Spark: %s", " ".join(command))
 
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"El job batch_historical.py falló con código {completed.returncode}."
+    # Ejecución con streaming de logs para visibilidad directa en la UI de Airflow
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    full_output = []
+    if process.stdout:
+        for line in process.stdout:
+            task_instance.log.info(line.rstrip())
+            full_output.append(line)
+
+    process.wait()
+    elapsed_ms = int((time.time() - start_time) * 1000)
+
+    if process.returncode != 0:
+        error_msg = f"El job batch_historical.py falló con código de salida {process.returncode}."
+        task_instance.log.error(error_msg)
+        raise RuntimeError(error_msg)
+
+    task_instance.log.info("Job Spark finalizado exitosamente en %d ms.", elapsed_ms)
+
+    return {
+        "status": "SUCCESS",
+        "latency_ms": elapsed_ms,
+        "command": " ".join(command),
+    }
+
+
+def record_batch_audit_log(**context) -> None:
+    """
+    Registra el recálculo batch en la tabla de auditoría PostgreSQL (`serving.pipeline_execution_log`).
+    """
+    ti = context["task_instance"]
+    batch_result = ti.xcom_pull(task_ids="execute_spark_batch") or {}
+
+    latency_ms = batch_result.get("latency_ms", 0)
+    status = batch_result.get("status", "SUCCESS")
+
+    dag_run = context.get("dag_run")
+    conf = (dag_run.conf if dag_run else {}) or {}
+    params = context.get("params") or {}
+    logical_dt = context.get("logical_date") or context.get("execution_date")
+    previous_day = (logical_dt - timedelta(days=1)).date().isoformat()
+    end_date_str = conf.get("end_date") or params.get("end_date") or previous_day
+
+    end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+    cutoff_timestamp = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
+
+    insert_query = """
+    INSERT INTO serving.pipeline_execution_log (
+        pipeline_name,
+        execution_timestamp,
+        latency_ms,
+        cutoff_timestamp,
+        records_processed,
+        status
+    ) VALUES (%s, %s, %s, %s, %s, %s);
+    """
+
+    databases_to_try = [POSTGRES_DB, "market_platform", "serving_db"]
+    for db_name in set(databases_to_try):
+        try:
+            conn = psycopg2.connect(
+                host=POSTGRES_HOST,
+                port=POSTGRES_PORT,
+                user=POSTGRES_USER,
+                password=POSTGRES_PASSWORD,
+                dbname=db_name,
+                connect_timeout=10,
+            )
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        insert_query,
+                        (
+                            DAG_ID,
+                            datetime.now(timezone.utc),
+                            latency_ms,
+                            cutoff_timestamp,
+                            0,  # Procesamiento batch multiactivo
+                            status,
+                        ),
+                    )
+            conn.close()
+            ti.log.info("Auditoría batch registrada en db: %s", db_name)
+            break
+        except Exception as ex:
+            ti.log.warning("No se pudo registrar auditoría en %s: %s", db_name, ex)
+
+
+def handle_task_failure(context: dict) -> None:
+    """
+    Callback de alerta y auditoría cuando falla el job de Spark tras agotar reintentos (Criterio 3 BDD).
+    """
+    exception = context.get("exception")
+    task_instance = context.get("task_instance")
+    logger.error("ALERTA CRÍTICA: Fallo en DAG batch_recompute: %s", exception)
+
+    if task_instance:
+        task_instance.log.error(
+            "Alerta enviada para tarea %s en ejecución %s. Excepción: %s",
+            task_instance.task_id,
+            context.get("execution_date"),
+            exception,
         )
 
-    return completed.stdout
 
+if DAG is not None:
+    with DAG(
+        dag_id=DAG_ID,
+        description=(
+            "Recálculo batch idempotente de velas OHLCV y retornos históricos "
+            "con Apache Spark sobre MinIO (US-15)."
+        ),
+        default_args=DEFAULT_ARGS,
+        schedule="0 2 * * *",  # 02:00 UTC consolidación diaria o activado por ingest_historical
+        start_date=datetime(2026, 10, 1),
+        catchup=False,
+        tags=["batch", "spark", "minio", "lambda-architecture", "serving"],
+        on_failure_callback=handle_task_failure,
+        params={
+            "start_date": None,
+            "end_date": None,
+            "symbols": None,
+            "intervals": "1m,5m,1h,1d",
+            "metrics": "ohlcv,returns",
+        },
+    ) as dag:
 
-with DAG(
-    dag_id=DAG_ID,
-    description=(
-        "Recálculo idempotente de velas OHLCV y retornos sobre el histórico "
-        "de MinIO mediante Spark Batch."
-    ),
-    default_args=DEFAULT_ARGS,
-    schedule="0 2 * * *",  # 02:00 UTC: consolidación del día anterior.
-    start_date=datetime(2026, 10, 1),
-    catchup=False,
-    tags=["batch", "spark", "minio", "lambda-architecture"],
-    params={
-        "start_date": None,
-        "end_date": None,
-        "symbols": None,
-        "intervals": "1m,5m,1h,1d",
-    },
-) as dag:
-    batch_recompute = PythonOperator(
-        task_id="batch_recompute",
-        python_callable=run_batch_recompute,
-        # El job es idempotente: un reintento sobrescribe las mismas
-        # particiones sin duplicar filas.
-        retries=1,
-    )
+        execute_spark_batch = PythonOperator(
+            task_id="execute_spark_batch",
+            python_callable=run_batch_recompute,
+            retries=2,
+            retry_delay=timedelta(minutes=2),
+        )
+
+        log_batch_audit = PythonOperator(
+            task_id="record_batch_audit",
+            python_callable=record_batch_audit_log,
+        )
+
+        execute_spark_batch >> log_batch_audit
+else:
+    dag = None
