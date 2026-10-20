@@ -69,3 +69,4 @@ Una vez verificado que los mensajes superan la validación:
 Si un mensaje en `market.dlq` tiene el payload corrupto (ej. JSON malformado no parseable) o continúa violando el contrato canónico tras la corrección:
 - **No se envía a `market.events`**: Permanece aislado para evitar fallos aguas abajo.
 - **Registro en log**: Se emite una alerta en los logs de Airflow indicando el offset y el ID de evento descartado.
+

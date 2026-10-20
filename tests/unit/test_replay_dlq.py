@@ -141,3 +141,4 @@ def test_replay_dlq_events_dry_run_and_execution():
     mock_producer.send.assert_called_once()
     mock_producer.flush.assert_called_once()
     mock_consumer.commit.assert_called_once()
+
