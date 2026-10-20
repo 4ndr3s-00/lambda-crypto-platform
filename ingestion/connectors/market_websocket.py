@@ -40,6 +40,7 @@ def _default_connect(url: str):
 class BinanceWebSocketConnector(BaseConnector):
     source = "binance_ws"
     exchange = "binance"
+    component = "market_websocket"
 
     def __init__(
         self,
@@ -67,7 +68,7 @@ class BinanceWebSocketConnector(BaseConnector):
         streams = "/".join(f"{s.lower()}@trade" for s in self.symbols)
         return f"{BINANCE_WS_BASE}?streams={streams}"
 
-    def fetch(self) -> Iterator[Dict[str, Any]]:
+    def fetch(self) -> Iterator[Any]:
         attempt = 0
         while not self.stop_event.is_set():
             try:
@@ -79,14 +80,15 @@ class BinanceWebSocketConnector(BaseConnector):
                         if not message:
                             raise ConnectionError("conexión cerrada por el servidor")
                         attempt = 0  # conexión sana: el próximo fallo vuelve a empezar desde base_delay
-                        yield json.loads(message)
+                        # Se entrega el texto crudo: si está corrupto lo rechaza normalize hacia la DLQ
+                        yield message
                 finally:
                     try:
                         ws.close()
                     except Exception:  # noqa: BLE001 - el cierre de un socket roto puede fallar
                         pass
             except Exception as err:  # noqa: BLE001
-                # Cualquier fallo de socket, timeout o JSON corrupto se resuelve reconectando
+                # Cualquier fallo de socket o timeout se resuelve reconectando
                 if self.max_reconnects is not None and self.reconnects >= self.max_reconnects:
                     raise
                 self.reconnects += 1
@@ -95,7 +97,11 @@ class BinanceWebSocketConnector(BaseConnector):
                 logger.warning("WebSocket caído (%s); reconectando en %.1fs", err, delay)
                 self._sleep(delay)
 
-    def normalize(self, raw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def normalize(self, raw: Any) -> Optional[Dict[str, Any]]:
+        if isinstance(raw, (str, bytes, bytearray)):
+            raw = json.loads(raw)  # ValueError si el JSON está corrupto
+        if not isinstance(raw, dict):
+            raise ValueError(f"se esperaba un objeto JSON y llegó {type(raw).__name__}")
         # Flujo combinado: {"stream": "...", "data": {...}}; flujo único: el trade directo
         trade = raw.get("data", raw)
         if trade.get("e") != "trade":
