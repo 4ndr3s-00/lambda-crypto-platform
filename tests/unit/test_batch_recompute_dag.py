@@ -111,3 +111,4 @@ def test_run_batch_recompute_failure_raises(mock_popen):
         assert "falló con código de salida 137" in str(ex)
 
     assert error_raised is True
+
