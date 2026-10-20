@@ -1,0 +1,16 @@
+transport:
+  type: http
+  url: ${OPENLINEAGE_URL:-http://openmetadata:8585/api/v1/lineage}
+  endpoint: /api/v1/lineage
+  auth:
+    type: api_key
+    apiKey: ${OPENLINEAGE_API_KEY:-lambda_lineage_token_secret}
+
+namespace: lambda-crypto-platform
+
+circuitBreaker:
+  type: simple
+  timeout: 2500
+
+metrics:
+  enabled: true
