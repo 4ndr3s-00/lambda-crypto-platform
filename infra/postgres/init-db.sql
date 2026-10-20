@@ -26,6 +26,10 @@ WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'serving_db')\gexec
 SELECT 'CREATE DATABASE metastore_db'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'metastore_db')\gexec
 
+-- Base de datos para Catálogo y Gobernanza OpenMetadata (US-25)
+SELECT 'CREATE DATABASE openmetadata_db'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'openmetadata_db')\gexec
+
 -- Base de datos adicional para compatibilidad con configuraciones previas
 SELECT 'CREATE DATABASE airflow'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'airflow')\gexec
@@ -58,16 +62,26 @@ BEGIN
     END IF;
 END $$;
 
+-- Usuario para OpenMetadata (US-25)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'openmetadata_user') THEN
+        CREATE USER openmetadata_user WITH ENCRYPTED PASSWORD 'openmetadata_secure_pass123';
+    END IF;
+END $$;
+
 -- Asignación de privilegios de bases de datos
 GRANT ALL PRIVILEGES ON DATABASE airflow_db TO airflow_user;
 GRANT ALL PRIVILEGES ON DATABASE airflow TO airflow_user;
 GRANT ALL PRIVILEGES ON DATABASE serving_db TO serving_user;
 GRANT ALL PRIVILEGES ON DATABASE metastore_db TO metastore_user;
+GRANT ALL PRIVILEGES ON DATABASE openmetadata_db TO openmetadata_user;
 
 -- El superusuario postgres mantiene acceso administrativo completo
 GRANT ALL PRIVILEGES ON DATABASE airflow_db TO postgres;
 GRANT ALL PRIVILEGES ON DATABASE serving_db TO postgres;
 GRANT ALL PRIVILEGES ON DATABASE metastore_db TO postgres;
+GRANT ALL PRIVILEGES ON DATABASE openmetadata_db TO postgres;
 
 -- ------------------------------------------------------------------------------
 -- 3. Estructura Relacional en serving_db (Criterio 2 BDD)

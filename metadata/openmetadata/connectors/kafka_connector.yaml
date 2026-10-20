@@ -1,0 +1,33 @@
+# ==============================================================================
+# OpenMetadata Connector: Apache Kafka Messaging Bus (US-25)
+# Responsable: Samuel Roncancio (Data Architect & Storage Lead)
+# ==============================================================================
+
+source:
+  type: messaging
+  serviceName: kafka_market_events
+  serviceConnection:
+    config:
+      type: Kafka
+      bootstrapServers: "kafka:9092"
+      schemaRegistryURL: ""
+  sourceConfig:
+    config:
+      type: MessagingMetadata
+      generateDataModels: true
+      topicFilterPattern:
+        includes:
+          - market\\.events
+          - market\\.ohlcv
+          - market\\.metrics
+          - market\\.dlq
+
+sink:
+  type: metadata-rest
+  config: {}
+
+workflowConfig:
+  openMetadataServerConnection:
+    hostPort: "http://openmetadata-server:8585/api"
+    authProvider: openmetadata
+    securityConfig: {}

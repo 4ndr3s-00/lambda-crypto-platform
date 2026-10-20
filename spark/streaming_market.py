@@ -419,6 +419,16 @@ def format_dlq_stream(classified_df: DataFrame) -> DataFrame:
             F.col("raw_payload").alias("raw_payload"),
             F.col("error_reason").alias("error"),
             F.current_timestamp().alias("dlq_timestamp"),
+            # Estructura común de la DLQ (US-09): la misma que usan los conectores de ingesta.
+            # Los campos de arriba se conservan para no romper a quien ya los lee.
+            F.col("raw_payload").alias("original_event"),
+            F.col("error_reason").alias("error_reason"),
+            F.lit("spark_streaming").alias("failed_component"),
+            F.date_format(
+                F.to_utc_timestamp(F.current_timestamp(), F.current_timezone()),
+                "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            ).alias("timestamp_utc"),
+            F.col("source").alias("source"),
         )
     )
 

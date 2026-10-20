@@ -319,3 +319,40 @@ Todo evento emitido por los conectores REST, WebSockets o CSV hacia Kafka (`mark
 ## 9. Licencia
 
 Este proyecto está bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE) para más información.
+
+---
+
+## 10. IA local Qwen2.5, RAG y guardrails (US-28 / US-29 / US-30)
+
+La capa de IA vive en `api/` y tiene dos modos:
+
+1. **Con Ollama** (`make up-all`): Qwen2.5 con function calling sobre herramientas de solo lectura.
+2. **Sin Ollama**: fallback determinista con las mismas herramientas, para que el dashboard y el chat funcionen sin GPU.
+
+| Archivo | Responsabilidad |
+| :--- | :--- |
+| `api/rag_indexer.py` | Indexa README, `metadata/docs/`, `metadata/catalog.json` y `metadata/glossary.json`. ChromaDB opcional; TF-IDF local si no está instalado. |
+| `api/llm_service.py` | Prompt + contexto RAG + tool calls de Ollama + fallback. |
+| `api/sql_guardrails.py` | SELECT-only, allowlist, `LIMIT <= 100`, timeout 5s, bloqueo de DDL/EXEC/funciones peligrosas. |
+| `api/tools.py` | Solo `get_catalog_metadata`, `query_metrics`, `query_timeseries`. Sin shell ni SQL libre. |
+
+```bash
+make rag-index                 # reconstruye metadata/rag_index.json
+make up-all                    # Ollama + ollama-init (pull del modelo)
+pip install -r api/requirements-llm.txt   # ChromaDB opcional
+make test                      # 35 tests
+```
+
+## 11. Dashboard y API de mercado
+
+El frontend se sirve en `http://localhost:8000/` y consume:
+
+- `GET /api/market/assets`
+- `GET /api/market/ohlcv?symbol=&interval=&limit=`
+- `GET /api/market/metrics?symbol=&window=`
+- `GET /api/market/pipeline`
+- `POST /api/chat` y `GET /api/chat/stream` (SSE)
+
+Incluye velas OHLCV + volumen en Canvas, crosshair, KPIs, polling cada 5s, panel de salud Kafka/Spark/Airflow/MinIO/DLQ con alerta > 60s y chat con fuentes, corte, SQL y disclaimer.
+
+Los endpoints originales de US-22 (`/api/health`, `/api/assets`, `/api/ohlcv`, `/api/metrics`, `/api/pipeline/status`) se mantienen intactos para no romper su contrato ni sus tests.

@@ -221,6 +221,25 @@ def test_bdd_us18_criterio_3_aislamiento_json_corrupto_a_dlq(spark):
         assert "dlq_timestamp" in parsed_val
 
 
+def test_us09_dlq_incluye_metadatos_de_rechazo(spark):
+    """
+    US-09, criterio 2: el mensaje de la DLQ lleva el payload original intacto y
+    los metadatos error_reason, failed_component, timestamp_utc y source.
+    """
+    payload = '{"event_id": "e1", "source": "binance_ws", "unclosed'
+    raw_df = _raw_events_df(spark, [payload])
+    dlq_df = streaming_market.format_dlq_stream(streaming_market.classify_and_parse_events(raw_df))
+
+    parsed = json.loads(dlq_df.collect()[0].value)
+    assert parsed["original_event"] == payload
+    assert parsed["error_reason"] == "CORRUPT_JSON_SYNTAX"
+    assert parsed["failed_component"] == "spark_streaming"
+    assert parsed["timestamp_utc"].endswith("Z")
+    assert "source" in parsed
+    # Los campos anteriores se mantienen para no romper a los consumidores existentes
+    assert parsed["error"] == "CORRUPT_JSON_SYNTAX" and "dlq_timestamp" in parsed
+
+
 def test_bdd_us18_criterio_3_aislamiento_precio_no_positivo(spark):
     """
     Dado un evento con precio <= 0 (infracción del contrato US-05),

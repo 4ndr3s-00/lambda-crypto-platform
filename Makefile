@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # Makefile para la Plataforma Lambda (Datos Financieros y Criptomonedas)
 # ==============================================================================
 
@@ -6,23 +6,24 @@ COMPOSE_FILE = infra/docker-compose.yml
 COMPOSE_SCALE_FILE = infra/docker-compose.scale.yml
 ENV_FILE = .env
 
-# Número de workers Spark del clúster. Cada worker aporta
+# NÃºmero de workers Spark del clÃºster. Cada worker aporta
 # SPARK_WORKER_CORES cores y SPARK_WORKER_MEMORY de memoria.
 WORKERS ?= 3
 
-.PHONY: help env up down restart ps logs logs-api logs-kafka logs-spark logs-airflow clean scale-spark scale-down
+.PHONY: help env up down restart ps logs logs-api logs-kafka logs-spark logs-airflow rag-index test clean scale-spark scale-down
 
 help:
 	@echo "Comandos disponibles:"
 	@echo "  make env           Copia .env.example a .env si no existe"
 	@echo "  make up            Levanta la infraestructura base (Kafka, MinIO, Postgres, Spark, API)"
+	@echo "  make up-metadata   Levanta OpenMetadata y OpenSearch (perfil metadata - US-25)"
 	@echo "  make up-all        Levanta todo el stack incluyendo LLM local (perfil llm)"
 	@echo "  make down          Detiene todos los contenedores"
 	@echo "  make restart       Reinicia todos los servicios"
 	@echo "  make ps            Muestra el estado de los contenedores"
 	@echo "  make logs          Muestra logs combinados en tiempo real"
-	@echo "  make scale-spark   Escala el clúster Spark a WORKERS workers (por defecto 3)"
-	@echo "  make clean         Detiene y elimina volúmenes y redes creadas"
+	@echo "  make scale-spark   Escala el clÃºster Spark a WORKERS workers (por defecto 3)"
+	@echo "  make clean         Detiene y elimina volÃºmenes y redes creadas"
 
 env:
 	@if [ ! -f $(ENV_FILE) ]; then \
@@ -37,6 +38,9 @@ up: env
 
 up-all: env
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) --profile llm up -d --build
+
+up-metadata: env
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) --profile metadata up -d
 
 down:
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) down
@@ -61,18 +65,25 @@ logs-spark:
 logs-airflow:
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) logs -f airflow
 
-# Escala el clúster Spark añadiendo workers al master ya en marcha.
+# Escala el clÃºster Spark aÃ±adiendo workers al master ya en marcha.
 # El override elimina el `container_name` fijo y publica un rango de puertos
-# para que cada réplica tenga su propia Web UI.
+# para que cada rÃ©plica tenga su propia Web UI.
 scale-spark:
 	docker compose -f $(COMPOSE_FILE) -f $(COMPOSE_SCALE_FILE) --env-file $(ENV_FILE) \
 		up -d --scale spark-worker=$(WORKERS) spark-worker
-	@echo "Clúster Spark escalado a $(WORKERS) workers. Verifica en http://localhost:$(SPARK_WORKER_WEBUI_PORT)"
+	@echo "ClÃºster Spark escalado a $(WORKERS) workers. Verifica en http://localhost:$(SPARK_WORKER_WEBUI_PORT)"
 
-# Vuelve a un único worker (el comportamiento por defecto de `make up`).
+# Vuelve a un Ãºnico worker (el comportamiento por defecto de `make up`).
 scale-down:
 	docker compose -f $(COMPOSE_FILE) -f $(COMPOSE_SCALE_FILE) --env-file $(ENV_FILE) \
 		up -d --scale spark-worker=1 spark-worker
+
+
+rag-index:
+	python -m api.rag_indexer --rebuild
+
+test:
+	python -m pytest -q
 
 clean:
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) down -v --remove-orphans

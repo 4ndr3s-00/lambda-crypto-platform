@@ -1,0 +1,50 @@
+# ==============================================================================
+# OpenMetadata Data Quality Test Suite: Market Data Contracts (US-25 Criterio 3 BDD)
+# Reglas requeridas:
+# 1. No nulidad en event_time
+# 2. No nulidad en price
+# 3. Unicidad estricta en event_id
+# 4. Valores de price > 0
+# ==============================================================================
+
+testSuiteName: market_event_contract_test_suite
+description: "Suite de pruebas automatizadas de calidad de datos para eventos de mercado y datasets batch/speed"
+
+entityReference:
+  type: table
+  fullyQualifiedName: "minio_market_lake.market-lake.historical.events"
+
+tests:
+  # Criterio 3.1: No nulidad en event_time
+  - testDefinitionName: columnValuesToBeNotNull
+    columnName: event_time
+    description: "Verifica que ninguna fila contenga marca temporal event_time nula"
+    parameterValues: []
+
+  # Criterio 3.2: No nulidad en price
+  - testDefinitionName: columnValuesToBeNotNull
+    columnName: price
+    description: "Verifica que ninguna fila contenga valor de cotización price nulo"
+    parameterValues: []
+
+  # Criterio 3.3: Unicidad de event_id
+  - testDefinitionName: columnValuesToBeUnique
+    columnName: event_id
+    description: "Verifica que el identificador canónico event_id sea 100% único sin colisiones"
+    parameterValues: []
+
+  # Criterio 3.4: Valores de precio > 0
+  - testDefinitionName: columnValuesToBeGreaterThan
+    columnName: price
+    description: "Verifica que el precio sea estrictamente positivo (price > 0)"
+    parameterValues:
+      - name: minValue
+        value: "0.0"
+
+  # Regla complementaria de contrato: Cantidad no negativa
+  - testDefinitionName: columnValuesToBeGreaterThanOrEquals
+    columnName: quantity
+    description: "Verifica que el volumen transaccionado sea no negativo (quantity >= 0)"
+    parameterValues:
+      - name: min
+        value: "0.0"
