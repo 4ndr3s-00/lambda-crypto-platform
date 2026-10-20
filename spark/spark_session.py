@@ -34,7 +34,11 @@ QUARANTINE_BUCKET = "market-quarantine"
 CHECKPOINTS_BUCKET = "market-checkpoints"
 
 
-def build_spark_session(app_name: str, master_url: str = None) -> SparkSession:
+def build_spark_session(
+    app_name: str,
+    master_url: str = None,
+    enable_kafka: bool = False,
+) -> SparkSession:
     """
     Crea (o reutiliza) la `SparkSession` conectada al clúster y a MinIO.
 
@@ -71,6 +75,14 @@ def build_spark_session(app_name: str, master_url: str = None) -> SparkSession:
         .config("spark.sql.sources.partitionOverwriteMode", "dynamic")
         .config("spark.sql.session.timeZone", "UTC")
     )
+
+    # Añadir soporte de conectores Kafka si se solicita o vía entorno
+    if enable_kafka or os.environ.get("SPARK_ENABLE_KAFKA", "").lower() in ("true", "1", "yes"):
+        builder = builder.config(
+            "spark.jars.packages",
+            "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1",
+        )
+
     return builder.getOrCreate()
 
 
@@ -102,3 +114,8 @@ def quarantine_path(source: str = None, date: str = None) -> str:
     if date:
         parts.append(f"date={date}")
     return "/".join(parts)
+
+
+def checkpoints_path(prefix: str = "") -> str:
+    """Prefijo de checkpoints duraderos en MinIO (US-20)."""
+    return lake_path(prefix, bucket=CHECKPOINTS_BUCKET)
