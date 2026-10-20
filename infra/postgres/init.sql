@@ -13,6 +13,9 @@ WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'serving_db')\gexec
 SELECT 'CREATE DATABASE metastore_db'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'metastore_db')\gexec
 
+SELECT 'CREATE DATABASE openmetadata_db'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'openmetadata_db')\gexec
+
 SELECT 'CREATE DATABASE airflow'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'airflow')\gexec
 
@@ -38,14 +41,23 @@ BEGIN
     END IF;
 END $$;
 
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'openmetadata_user') THEN
+        CREATE USER openmetadata_user WITH ENCRYPTED PASSWORD 'openmetadata_secure_pass123';
+    END IF;
+END $$;
+
 GRANT ALL PRIVILEGES ON DATABASE airflow_db TO airflow_user;
 GRANT ALL PRIVILEGES ON DATABASE airflow TO airflow_user;
 GRANT ALL PRIVILEGES ON DATABASE serving_db TO serving_user;
 GRANT ALL PRIVILEGES ON DATABASE metastore_db TO metastore_user;
+GRANT ALL PRIVILEGES ON DATABASE openmetadata_db TO openmetadata_user;
 
 GRANT ALL PRIVILEGES ON DATABASE airflow_db TO postgres;
 GRANT ALL PRIVILEGES ON DATABASE serving_db TO postgres;
 GRANT ALL PRIVILEGES ON DATABASE metastore_db TO postgres;
+GRANT ALL PRIVILEGES ON DATABASE openmetadata_db TO postgres;
 
 -- 3. Estructura Relacional en serving_db (Criterio 2 BDD)
 \c serving_db;

@@ -16,6 +16,7 @@ help:
 	@echo "Comandos disponibles:"
 	@echo "  make env           Copia .env.example a .env si no existe"
 	@echo "  make up            Levanta la infraestructura base (Kafka, MinIO, Postgres, Spark, API)"
+	@echo "  make up-metadata   Levanta OpenMetadata y OpenSearch (perfil metadata - US-25)"
 	@echo "  make up-all        Levanta todo el stack incluyendo LLM local (perfil llm)"
 	@echo "  make down          Detiene todos los contenedores"
 	@echo "  make restart       Reinicia todos los servicios"
@@ -37,6 +38,9 @@ up: env
 
 up-all: env
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) --profile llm up -d --build
+
+up-metadata: env
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) --profile metadata up -d
 
 down:
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) down

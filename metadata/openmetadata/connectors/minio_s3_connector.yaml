@@ -1,0 +1,40 @@
+# ==============================================================================
+# OpenMetadata Connector: MinIO S3 Compatible Data Lake (US-25)
+# Responsable: Samuel Roncancio (Data Architect & Storage Lead)
+# ==============================================================================
+
+source:
+  type: datalake
+  serviceName: minio_market_lake
+  serviceConnection:
+    config:
+      type: Datalake
+      configSource:
+        type: S3Config
+        securityConfig:
+          awsAccessKeyId: "${API_MINIO_USER:-api_service}"
+          awsSecretAccessKey: "${API_MINIO_PASSWORD:-api_secure_serving_pass123}"
+          awsRegion: "us-east-1"
+          endPointURL: "http://minio:9000"
+      bucketNames:
+        - market-lake
+        - market-checkpoints
+        - market-quarantine
+      prefixExcludes:
+        - ".*\\.keep$"
+  sourceConfig:
+    config:
+      type: DatalakeMetadata
+      generateDataModels: true
+      includeTags: true
+      enableDebugLog: false
+
+sink:
+  type: metadata-rest
+  config: {}
+
+workflowConfig:
+  openMetadataServerConnection:
+    hostPort: "http://openmetadata-server:8585/api"
+    authProvider: openmetadata
+    securityConfig: {}
