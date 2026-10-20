@@ -1,0 +1,173 @@
+{
+  "classificationDefs": [
+    {
+      "name": "Datos_Publicos_Mercado",
+      "description": "Datos financieros y transaccionales públicos de mercado (ticks, libros, trades, velas OHLCV) que no revisten confidencialidad ni datos personales.",
+      "superTypes": [],
+      "typeVersion": "1.0",
+      "attributeDefs": [
+        {
+          "name": "fuente_origen",
+          "typeName": "string",
+          "isOptional": false,
+          "cardinality": "SINGLE",
+          "valuesMinCount": 1,
+          "valuesMaxCount": 1,
+          "isUnique": false,
+          "isIndexable": true,
+          "description": "Exchange o conector generador (ej. binance, coingecko, synthetic)"
+        },
+        {
+          "name": "frecuencia_actualizacion",
+          "typeName": "string",
+          "isOptional": true,
+          "cardinality": "SINGLE",
+          "isUnique": false,
+          "isIndexable": false,
+          "description": "Granularidad temporal de actualización (ej. streaming-ms, 1m, 1h, 1d)"
+        },
+        {
+          "name": "es_publico",
+          "typeName": "boolean",
+          "isOptional": false,
+          "cardinality": "SINGLE",
+          "isUnique": false,
+          "isIndexable": true,
+          "defaultValue": "true",
+          "description": "Indica si el activo es libremente distribuible a consumidores externos"
+        }
+      ]
+    },
+    {
+      "name": "Metadatos_Sensibles",
+      "description": "Información confidencial de infraestructura, claves de API de exchanges, secretos de bases de datos y cadenas de conexión.",
+      "superTypes": [],
+      "typeVersion": "1.0",
+      "attributeDefs": [
+        {
+          "name": "nivel_criticidad",
+          "typeName": "string",
+          "isOptional": false,
+          "cardinality": "SINGLE",
+          "valuesMinCount": 1,
+          "valuesMaxCount": 1,
+          "isUnique": false,
+          "isIndexable": true,
+          "description": "Nivel de impacto ante fuga (CRITICO, ALTO, MEDIO)"
+        },
+        {
+          "name": "normativa_aplicable",
+          "typeName": "string",
+          "isOptional": true,
+          "cardinality": "SINGLE",
+          "isUnique": false,
+          "isIndexable": true,
+          "description": "Estándar de seguridad asociado (ej. SOC2, ISO27001, PCI-DSS)"
+        },
+        {
+          "name": "requiere_cifrado",
+          "typeName": "boolean",
+          "isOptional": false,
+          "cardinality": "SINGLE",
+          "isUnique": false,
+          "isIndexable": false,
+          "defaultValue": "true",
+          "description": "Obligatoriedad de cifrado en reposo (AES-256) y en tránsito (TLS 1.3)"
+        }
+      ]
+    },
+    {
+      "name": "Datos_Provisionales_Speed",
+      "description": "Datos de analítica de alta frecuencia calculados por la Speed Layer sujetos a sustitución en la Serving Layer por la capa Batch.",
+      "superTypes": [],
+      "typeVersion": "1.0",
+      "attributeDefs": [
+        {
+          "name": "capa_origen",
+          "typeName": "string",
+          "isOptional": false,
+          "cardinality": "SINGLE",
+          "defaultValue": "Speed Layer (Spark Streaming)",
+          "isUnique": false,
+          "isIndexable": true,
+          "description": "Componente generador de la arquitectura Lambda"
+        },
+        {
+          "name": "reconciliado_por_batch",
+          "typeName": "boolean",
+          "isOptional": false,
+          "cardinality": "SINGLE",
+          "defaultValue": "false",
+          "isUnique": false,
+          "isIndexable": true,
+          "description": "Marca si la ventana ya fue sustituida por el recálculo histórico exacto"
+        },
+        {
+          "name": "ttl_segundos",
+          "typeName": "int",
+          "isOptional": true,
+          "cardinality": "SINGLE",
+          "defaultValue": "86400",
+          "isUnique": false,
+          "isIndexable": false,
+          "description": "Tiempo de vida máximo en la capa de serving provisional antes del corte"
+        }
+      ]
+    },
+    {
+      "name": "Datos_Historicos_Inmutables",
+      "description": "Conjuntos de datos históricos consolidados por la capa Batch en MinIO (Data Lake funcional) en formato Parquet.",
+      "superTypes": [],
+      "typeVersion": "1.0",
+      "attributeDefs": [
+        {
+          "name": "particion_clave",
+          "typeName": "string",
+          "isOptional": false,
+          "cardinality": "SINGLE",
+          "defaultValue": "date",
+          "isUnique": false,
+          "isIndexable": true,
+          "description": "Columna de particionado en el storage funcional de MinIO"
+        },
+        {
+          "name": "formato_almacenamiento",
+          "typeName": "string",
+          "isOptional": false,
+          "cardinality": "SINGLE",
+          "defaultValue": "parquet",
+          "isUnique": false,
+          "isIndexable": true,
+          "description": "Formato columnar optimizado"
+        }
+      ]
+    },
+    {
+      "name": "Datos_Cuarentena_DLQ",
+      "description": "Eventos no conformes al contrato canónico de datos aislados para auditoría de ingesta y preservación de resiliencia.",
+      "superTypes": [],
+      "typeVersion": "1.0",
+      "attributeDefs": [
+        {
+          "name": "causa_rechazo",
+          "typeName": "string",
+          "isOptional": false,
+          "cardinality": "SINGLE",
+          "isUnique": false,
+          "isIndexable": true,
+          "description": "Diagnóstico del fallo (sintaxis corrupta, tipos inválidos, campos ausentes)"
+        },
+        {
+          "name": "destino_cuarentena",
+          "typeName": "string",
+          "isOptional": false,
+          "cardinality": "SINGLE",
+          "defaultValue": "market-quarantine / market.dlq",
+          "isUnique": false,
+          "isIndexable": true,
+          "description": "Ruta de almacenamiento o topic de la Dead-Letter Queue"
+        }
+      ]
+    }
+  ]
+}
