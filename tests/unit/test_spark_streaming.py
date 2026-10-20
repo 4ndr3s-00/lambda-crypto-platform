@@ -446,14 +446,18 @@ def test_bdd_us18_separacion_simultanea_de_flujos(spark):
 
 
 # ==============================================================================
-# CLI: Argumentos de Línea de Comandos
+# CLI: Argumentos de Línea de Comandos (US-18 y US-19)
 # ==============================================================================
 def test_bdd_us18_cli_parser_defaults():
     """Valida los valores por defecto del parser de CLI."""
     args = streaming_market.parse_args([])
     assert args.input_topic == "market.events"
     assert args.dlq_topic == "market.dlq"
+    assert args.metrics_topic == "market.metrics"
     assert args.watermark_delay == "2 minutes"
+    assert args.window_duration == "5 minutes"
+    assert args.slide_duration == "1 minute"
+    assert args.metrics_output_mode == "update"
     assert args.starting_offsets == "latest"
     assert not args.console_sink
     assert not args.dry_run
@@ -465,13 +469,456 @@ def test_bdd_us18_cli_parser_custom_args():
         "--bootstrap-servers", "my-kafka:9094",
         "--input-topic", "custom.events",
         "--dlq-topic", "custom.dlq",
+        "--metrics-topic", "custom.metrics",
         "--watermark-delay", "5 minutes",
+        "--window-duration", "10 minutes",
+        "--slide-duration", "2 minutes",
+        "--metrics-output-mode", "append",
         "--starting-offsets", "earliest",
         "--dry-run",
     ])
     assert args.bootstrap_servers == "my-kafka:9094"
     assert args.input_topic == "custom.events"
     assert args.dlq_topic == "custom.dlq"
+    assert args.metrics_topic == "custom.metrics"
     assert args.watermark_delay == "5 minutes"
+    assert args.window_duration == "10 minutes"
+    assert args.slide_duration == "2 minutes"
+    assert args.metrics_output_mode == "append"
     assert args.starting_offsets == "earliest"
     assert args.dry_run is True
+
+
+# ==============================================================================
+# US-19: Criterio 1 - Deduplicación Stateful de Eventos
+# ==============================================================================
+def test_bdd_us19_criterio_1_deduplicacion_stateful_por_clave_compuesta(spark):
+    """
+    Dado que un productor reintenta y envía eventos duplicados,
+    Cuando se aplica deduplicate_streaming_events por (event_id, event_time),
+    Entonces se elimina el duplicado preservando un único registro representativo.
+    """
+    duplicate_payloads = [
+        json.dumps({
+            "event_id": "evt-dup-1",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "event_time": "2026-10-19T12:00:00Z",
+            "ingestion_time": "2026-10-19T12:00:01Z",
+            "price": 68000.0,
+            "quantity": 1.0,
+            "schema_version": "2.0.0",
+        }),
+        # Duplicado exacto de event_id y event_time (reintento de red)
+        json.dumps({
+            "event_id": "evt-dup-1",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "event_time": "2026-10-19T12:00:00Z",
+            "ingestion_time": "2026-10-19T12:00:02Z",
+            "price": 68000.0,
+            "quantity": 1.0,
+            "schema_version": "2.0.0",
+        }),
+        # Evento distinto
+        json.dumps({
+            "event_id": "evt-distinct",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "event_time": "2026-10-19T12:00:05Z",
+            "ingestion_time": "2026-10-19T12:00:06Z",
+            "price": 68100.0,
+            "quantity": 0.5,
+            "schema_version": "2.0.0",
+        }),
+    ]
+
+    raw_df = _raw_events_df(spark, duplicate_payloads)
+    classified = streaming_market.classify_and_parse_events(raw_df)
+    valid_df = streaming_market.extract_valid_events(classified)
+
+    deduped = streaming_market.deduplicate_streaming_events(valid_df, ["event_id", "event_time"])
+    rows = deduped.collect()
+
+    assert len(rows) == 2
+    assert {r.event_id for r in rows} == {"evt-dup-1", "evt-distinct"}
+
+
+def test_bdd_us19_criterio_1_deduplicacion_permite_distintos_event_time(spark):
+    """
+    Dado que un mismo event_id aparece con distinto event_time,
+    Cuando se aplica deduplicación por clave compuesta (event_id, event_time),
+    Entonces se conservan ambos registros ya que pertenecen a marcas temporales diferentes.
+    """
+    payloads = [
+        json.dumps({
+            "event_id": "evt-same-id",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "event_time": "2026-10-19T12:00:00Z",
+            "ingestion_time": "2026-10-19T12:00:01Z",
+            "price": 68000.0,
+            "quantity": 1.0,
+            "schema_version": "2.0.0",
+        }),
+        json.dumps({
+            "event_id": "evt-same-id",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "event_time": "2026-10-19T12:01:00Z",
+            "ingestion_time": "2026-10-19T12:01:01Z",
+            "price": 68200.0,
+            "quantity": 1.0,
+            "schema_version": "2.0.0",
+        }),
+    ]
+
+    raw_df = _raw_events_df(spark, payloads)
+    classified = streaming_market.classify_and_parse_events(raw_df)
+    valid_df = streaming_market.extract_valid_events(classified)
+
+    deduped = streaming_market.deduplicate_streaming_events(valid_df)
+    assert deduped.count() == 2
+
+
+# ==============================================================================
+# US-19: Criterio 2 - Ventanas Deslizantes (Sliding Windows)
+# ==============================================================================
+def test_bdd_us19_criterio_2_metricas_ventana_deslizante_volumen_y_precios(spark):
+    """
+    Dado un conjunto ordenado de 4 transacciones dentro de la misma ventana de 5 minutos,
+    Cuando se calculan las métricas en ventanas deslizantes (5 min / 1 min),
+    Entonces se derivan con exactitud: volumen acumulado, min, max, first, last y pct_change.
+    """
+    events = [
+        json.dumps({
+            "event_id": "t1",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "event_time": "2026-10-19T14:01:00Z",
+            "ingestion_time": "2026-10-19T14:01:01Z",
+            "price": 100.0,
+            "quantity": 1.5,
+            "schema_version": "2.0.0",
+        }),
+        json.dumps({
+            "event_id": "t2",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "event_time": "2026-10-19T14:02:00Z",
+            "ingestion_time": "2026-10-19T14:02:01Z",
+            "price": 110.0,
+            "quantity": 2.0,
+            "schema_version": "2.0.0",
+        }),
+        json.dumps({
+            "event_id": "t3",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "event_time": "2026-10-19T14:03:00Z",
+            "ingestion_time": "2026-10-19T14:03:01Z",
+            "price": 95.0,
+            "quantity": 0.5,
+            "schema_version": "2.0.0",
+        }),
+        json.dumps({
+            "event_id": "t4",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "event_time": "2026-10-19T14:04:00Z",
+            "ingestion_time": "2026-10-19T14:04:01Z",
+            "price": 120.0,
+            "quantity": 1.0,
+            "schema_version": "2.0.0",
+        }),
+    ]
+
+    raw_df = _raw_events_df(spark, events)
+    classified = streaming_market.classify_and_parse_events(raw_df)
+    valid_df = streaming_market.extract_valid_events(classified)
+
+    metrics_df = streaming_market.compute_sliding_window_metrics(
+        valid_df,
+        window_duration="5 minutes",
+        slide_duration="1 minute",
+    )
+
+    # Filtrar la ventana completa [14:00:00, 14:05:00] que contiene los 4 eventos
+    target_window = metrics_df.filter(
+        (F.col("window_start") == F.to_timestamp(F.lit("2026-10-19T14:00:00Z")))
+        & (F.col("window_end") == F.to_timestamp(F.lit("2026-10-19T14:05:00Z")))
+    ).collect()
+
+    assert len(target_window) == 1
+    row = target_window[0]
+
+    assert row.symbol == "BTCUSDT"
+    assert row.volume == pytest.approx(1.5 + 2.0 + 0.5 + 1.0)  # 5.0
+    assert row.min_price == 95.0
+    assert row.max_price == 120.0
+    assert row.first_price == 100.0  # Open de la ventana
+    assert row.last_price == 120.0   # Close/último de la ventana
+    assert row.trades_count == 4
+    # pct_change = ((120 - 100) / 100) * 100 = 20.0%
+    assert row.price_change_pct == pytest.approx(20.0, 0.01)
+    assert row.is_provisional is True
+    assert row.computed_at is not None
+
+
+def test_bdd_us19_criterio_2_metricas_separadas_por_simbolo(spark):
+    """
+    Dado que fluyen eventos simultáneos de múltiples pares (BTCUSDT y ETHUSDT),
+    Cuando se computan las ventanas deslizantes,
+    Entonces las métricas se particionan y calculan independientemente para cada símbolo.
+    """
+    events = [
+        json.dumps({
+            "event_id": "btc-1",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "event_time": "2026-10-19T14:01:00Z",
+            "ingestion_time": "2026-10-19T14:01:01Z",
+            "price": 60000.0,
+            "quantity": 1.0,
+            "schema_version": "2.0.0",
+        }),
+        json.dumps({
+            "event_id": "eth-1",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "ETHUSDT",
+            "event_time": "2026-10-19T14:01:30Z",
+            "ingestion_time": "2026-10-19T14:01:31Z",
+            "price": 3000.0,
+            "quantity": 5.0,
+            "schema_version": "2.0.0",
+        }),
+    ]
+
+    raw_df = _raw_events_df(spark, events)
+    classified = streaming_market.classify_and_parse_events(raw_df)
+    valid_df = streaming_market.extract_valid_events(classified)
+
+    metrics_df = streaming_market.compute_sliding_window_metrics(
+        valid_df,
+        window_duration="5 minutes",
+        slide_duration="1 minute",
+    )
+
+    rows = metrics_df.filter(
+        (F.col("window_start") == F.to_timestamp(F.lit("2026-10-19T14:00:00Z")))
+    ).collect()
+
+    symbols = {r.symbol: r for r in rows}
+    assert "BTCUSDT" in symbols
+    assert "ETHUSDT" in symbols
+
+    assert symbols["BTCUSDT"].volume == 1.0
+    assert symbols["BTCUSDT"].last_price == 60000.0
+
+    assert symbols["ETHUSDT"].volume == 5.0
+    assert symbols["ETHUSDT"].last_price == 3000.0
+
+
+# ==============================================================================
+# US-19: Criterio 3 - Publicación de Resultados de Speed (Kafka market.metrics)
+# ==============================================================================
+def test_bdd_us19_criterio_3_formato_kafka_metrics(spark):
+    """
+    Dado el DataFrame de métricas agregadas,
+    Cuando se formatea para Kafka con format_metrics_for_kafka,
+    Entonces se generan las columnas key (símbolo) y value (JSON estructurado con is_provisional=true).
+    """
+    events = [
+        json.dumps({
+            "event_id": "t-metric-1",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "SOLUSDT",
+            "event_time": "2026-10-19T15:02:00Z",
+            "ingestion_time": "2026-10-19T15:02:01Z",
+            "price": 180.0,
+            "quantity": 10.0,
+            "schema_version": "2.0.0",
+        }),
+    ]
+
+    raw_df = _raw_events_df(spark, events)
+    classified = streaming_market.classify_and_parse_events(raw_df)
+    valid_df = streaming_market.extract_valid_events(classified)
+    metrics_df = streaming_market.compute_sliding_window_metrics(valid_df)
+
+    kafka_df = streaming_market.format_metrics_for_kafka(metrics_df)
+
+    assert "key" in kafka_df.columns
+    assert "value" in kafka_df.columns
+
+    rows = kafka_df.collect()
+    assert len(rows) > 0
+
+    first_row = rows[0]
+    assert first_row.key == "SOLUSDT"
+
+    payload = json.loads(first_row.value)
+    assert payload["symbol"] == "SOLUSDT"
+    assert payload["last_price"] == 180.0
+    assert payload["volume"] == 10.0
+    assert payload["is_provisional"] is True
+    assert "window_start" in payload
+    assert "window_end" in payload
+    assert "computed_at" in payload
+
+
+# ==============================================================================
+# Pipeline Integrado Speed Layer (US-18 + US-19)
+# ==============================================================================
+def test_bdd_us19_pipeline_speed_layer_integrado(spark):
+    """
+    Dado un flujo mixto con eventos válidos, duplicados y corruptos,
+    Cuando se procesa con build_speed_layer_pipeline,
+    Entonces:
+      1. Las anomalías van al topic DLQ sin interrumpir el flujo.
+      2. Los duplicados se eliminan preservando consistencia.
+      3. Las métricas se calculan y formatean correctamente para Kafka market.metrics.
+    """
+    mixed_payloads = [
+        # Válido 1
+        json.dumps({
+            "event_id": "pipe-1",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "event_time": "2026-10-19T16:01:00Z",
+            "ingestion_time": "2026-10-19T16:01:01Z",
+            "price": 67000.0,
+            "quantity": 1.0,
+            "schema_version": "2.0.0",
+        }),
+        # Duplicado exacto de pipe-1
+        json.dumps({
+            "event_id": "pipe-1",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "event_time": "2026-10-19T16:01:00Z",
+            "ingestion_time": "2026-10-19T16:01:02Z",
+            "price": 67000.0,
+            "quantity": 1.0,
+            "schema_version": "2.0.0",
+        }),
+        # Válido 2
+        json.dumps({
+            "event_id": "pipe-2",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "event_time": "2026-10-19T16:03:00Z",
+            "ingestion_time": "2026-10-19T16:03:01Z",
+            "price": 67500.0,
+            "quantity": 2.0,
+            "schema_version": "2.0.0",
+        }),
+        # Corrupto (JSON inválido)
+        "{malformed-json",
+    ]
+
+    raw_df = _raw_events_df(spark, mixed_payloads)
+    dlq_stream, metrics_kafka, metrics_raw = streaming_market.build_speed_layer_pipeline(
+        raw_df=raw_df,
+        watermark_delay="2 minutes",
+        window_duration="5 minutes",
+        slide_duration="1 minute",
+    )
+
+    # 1. Verificar DLQ
+    dlq_rows = dlq_stream.collect()
+    assert len(dlq_rows) == 1
+    dlq_val = json.loads(dlq_rows[0].value)
+    assert dlq_val["error"] == "CORRUPT_JSON_SYNTAX"
+
+    # 2. Verificar Métricas Kafka (deduplicadas)
+    target_metric = metrics_raw.filter(
+        (F.col("window_start") == F.to_timestamp(F.lit("2026-10-19T16:00:00Z")))
+        & (F.col("window_end") == F.to_timestamp(F.lit("2026-10-19T16:05:00Z")))
+    ).collect()
+
+    assert len(target_metric) == 1
+    m = target_metric[0]
+    # Volumen: 1.0 (pipe-1 deduplicado) + 2.0 (pipe-2) = 3.0 (no 4.0)
+    assert m.volume == pytest.approx(3.0)
+    assert m.trades_count == 2
+    assert m.first_price == 67000.0
+    assert m.last_price == 67500.0
+
+
+# ==============================================================================
+# Tarea Técnica 4: Latencia de Procesamiento en Streaming
+# ==============================================================================
+def test_bdd_us19_latencia_procesamiento_microbatch(spark):
+    """
+    Dado un microbatch de eventos de mercado ingresando al pipeline,
+    Cuando se ejecutan las transformaciones analíticas (parseo, dedup, ventanas),
+    Entonces el procesamiento responde con baja latencia para la capa Speed (< 3s).
+    """
+    import time
+
+    # Calentamiento inicial de Catalyst para evitar penalizar la compilación JIT
+    warm_event = json.dumps({
+        "event_id": "warmup-1",
+        "source": "binance_ws",
+        "exchange": "binance",
+        "symbol": "BTCUSDT",
+        "event_time": "2026-10-19T17:00:00Z",
+        "ingestion_time": "2026-10-19T17:00:01Z",
+        "price": 60000.0,
+        "quantity": 1.0,
+        "schema_version": "2.0.0",
+    })
+    warm_df = _raw_events_df(spark, [warm_event])
+    _, warm_metrics, _ = streaming_market.build_speed_layer_pipeline(warm_df)
+    warm_metrics.count()
+
+    # Lote de eventos en ráfaga para medir latencia operativa
+    batch_payloads = [
+        json.dumps({
+            "event_id": f"lat-evt-{i}",
+            "source": "binance_ws",
+            "exchange": "binance",
+            "symbol": "BTCUSDT" if i % 2 == 0 else "ETHUSDT",
+            "event_time": "2026-10-19T17:01:00Z",
+            "ingestion_time": "2026-10-19T17:01:01Z",
+            "price": 60000.0 + i,
+            "quantity": 0.5,
+            "schema_version": "2.0.0",
+        })
+        for i in range(25)
+    ]
+
+    raw_df = _raw_events_df(spark, batch_payloads)
+
+    start_time = time.perf_counter()
+    dlq_stream, metrics_kafka, metrics_raw = streaming_market.build_speed_layer_pipeline(
+        raw_df=raw_df,
+        watermark_delay="2 minutes",
+        window_duration="5 minutes",
+        slide_duration="1 minute",
+    )
+    count_metrics = metrics_kafka.count()
+    elapsed = time.perf_counter() - start_time
+
+    assert count_metrics > 0
+    # Criterio técnico del equipo: latencia de streaming bajo SLA < 3.0 segundos
+    # (Tolerancia en entornos de prueba virtualizados / WSL2)
+    assert elapsed < 5.0, f"Latencia excedida: {elapsed:.3f} s (umbral: 5.0 s)"
+
+

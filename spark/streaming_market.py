@@ -1,28 +1,30 @@
 """
 Spark Structured Streaming: Ingesta continua en tiempo real con event-time,
-marcas de agua (watermarks) y enrutamiento a Dead-Letter Queue (DLQ).
+marcas de agua (watermarks), enrutamiento a Dead-Letter Queue (DLQ),
+deduplicación stateful y cálculo de métricas en ventanas deslizantes.
 
-Historia de Usuario: US-18 (Épica 6: Spark Streaming - Responsable: Diego)
+Historias de Usuario cubiertas:
+    - US-18: Pipeline de Structured Streaming con event-time y watermarks
+             (Criterio 1: parseo de esquema y event_time como Timestamp,
+              Criterio 2: watermark explícito de retención de estado,
+              Criterio 3: aislamiento de anomalías hacia topic market.dlq).
+    - US-19: Deduplicación en tiempo real y cálculo de métricas en ventanas deslizantes
+             (Criterio 1: deduplicación stateful con dropDuplicates(["event_id", "event_time"]),
+              Criterio 2: agregaciones en ventanas deslizantes de 5 min / 1 min,
+              Criterio 3: emisión a topic market.metrics con is_provisional = true).
 
-Criterios de Aceptación (BDD):
-    - Criterio 1: Consumo continuo y parseo de esquema
-      Deserializa mensajes JSON desde Kafka (topic `market.events`) contra el
-      contrato canónico (ingestion/contracts/market_event.schema.json) y tipa
-      estrictamente la marca temporal `event_time` como columna Timestamp.
-    - Criterio 2: Definición de marca de agua (Watermark)
-      Configura un watermark explícito (por defecto '2 minutes') sobre `event_time`
-      para delimitar la retención de estado en memoria y mitigar desbordes de RAM.
-    - Criterio 3: Enrutamiento de anomalías a DLQ
-      Ante mensajes corruptos o no conformes al contrato, aísla el registro
-      y lo publica en el topic `market.dlq` sin colapsar el streaming.
+Responsable Principal: Diego (Lead de la Capa de Velocidad / Speed Layer)
 
 Ejemplo de ejecución con spark-submit:
     spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1 \\
         spark/streaming_market.py \\
         --bootstrap-servers kafka:9092 \\
         --input-topic market.events \\
+        --metrics-topic market.metrics \\
         --dlq-topic market.dlq \\
-        --watermark-delay "2 minutes"
+        --watermark-delay "2 minutes" \\
+        --window-duration "5 minutes" \\
+        --slide-duration "1 minute"
 """
 
 import argparse
@@ -69,12 +71,16 @@ MARKET_EVENT_SCHEMA = StructType([
 DEFAULT_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 DEFAULT_INPUT_TOPIC = "market.events"
 DEFAULT_DLQ_TOPIC = "market.dlq"
+DEFAULT_METRICS_TOPIC = "market.metrics"
 DEFAULT_WATERMARK_DELAY = "2 minutes"
+DEFAULT_WINDOW_DURATION = "5 minutes"
+DEFAULT_SLIDE_DURATION = "1 minute"
+DEFAULT_METRICS_OUTPUT_MODE = "update"
 DEFAULT_CHECKPOINT_DIR = checkpoints_path("spark/query=market-stream")
 
 
 # ==============================================================================
-# CLI (US-18)
+# CLI (US-18 y US-19)
 # ==============================================================================
 def parse_args(argv=None) -> argparse.Namespace:
     """Define los parámetros de configuración de la CLI de Spark Streaming."""
@@ -82,7 +88,7 @@ def parse_args(argv=None) -> argparse.Namespace:
         prog="streaming_market.py",
         description=(
             "Job Spark Structured Streaming: consumo de Kafka con event-time, "
-            "watermarks y enrutamiento a Dead-Letter Queue (DLQ)."
+            "watermarks, deduplicación, métricas de ventana y DLQ."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -105,10 +111,35 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="Topic Kafka de salida para eventos anómalos o corruptos (DLQ).",
     )
     parser.add_argument(
+        "--metrics-topic",
+        type=str,
+        default=DEFAULT_METRICS_TOPIC,
+        help="Topic Kafka de salida para métricas calculadas en tiempo real (US-19).",
+    )
+    parser.add_argument(
         "--watermark-delay",
         type=str,
         default=DEFAULT_WATERMARK_DELAY,
         help="Retraso de la marca de agua (ej. '2 minutes', '5 minutes').",
+    )
+    parser.add_argument(
+        "--window-duration",
+        type=str,
+        default=DEFAULT_WINDOW_DURATION,
+        help="Tamaño de la ventana temporal de agregación (ej. '5 minutes').",
+    )
+    parser.add_argument(
+        "--slide-duration",
+        type=str,
+        default=DEFAULT_SLIDE_DURATION,
+        help="Intervalo de deslizamiento de la ventana temporal (ej. '1 minute').",
+    )
+    parser.add_argument(
+        "--metrics-output-mode",
+        type=str,
+        default=DEFAULT_METRICS_OUTPUT_MODE,
+        choices=("update", "append"),
+        help="Modo de salida para las métricas en Kafka: 'update' (provisionales rápidas) o 'append' (cierre de ventana).",
     )
     parser.add_argument(
         "--starting-offsets",
@@ -126,7 +157,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "--console-sink",
         action="store_true",
-        help="Emite eventos válidos por consola para depuración y monitoreo local.",
+        help="Emite eventos válidos y métricas por consola para depuración y monitoreo local.",
     )
     parser.add_argument(
         "--dry-run",
@@ -292,6 +323,85 @@ def apply_watermark(
 
 
 # ==============================================================================
+# Deduplicación Stateful en Tiempo Real (US-19: Criterio 1)
+# ==============================================================================
+def deduplicate_streaming_events(
+    df: DataFrame,
+    dedup_keys: list = None,
+) -> DataFrame:
+    """
+    Aplica deduplicación de eventos en tiempo real preservando memoria (US-19, Criterio 1).
+
+    En Structured Streaming con marcas de agua, `dropDuplicates(["event_id", "event_time"])`
+    utiliza el StateStore de Spark para recordar los IDs ya vistos, pero evacúa
+    automáticamente los registros cuya marca de tiempo cae por detrás del watermark actual.
+    Esto garantiza deduplicación exacta tolerando reintentos del productor sin agotar la RAM.
+    """
+    keys = dedup_keys or ["event_id", "event_time"]
+    return df.dropDuplicates(keys)
+
+
+# ==============================================================================
+# Métricas Operativas en Ventanas Deslizantes (US-19: Criterio 2)
+# ==============================================================================
+def compute_sliding_window_metrics(
+    df: DataFrame,
+    window_duration: str = DEFAULT_WINDOW_DURATION,
+    slide_duration: str = DEFAULT_SLIDE_DURATION,
+) -> DataFrame:
+    """
+    Calcula métricas de mercado sobre ventanas de tiempo deslizantes (US-19, Criterio 2).
+
+    Agrupa los eventos por ventana temporal y símbolo:
+        `groupBy(window(col("event_time"), "5 minutes", "1 minute"), col("symbol"))`
+
+    Métricas calculadas:
+        - `volume`: Volumen transaccionado acumulado en la ventana (sum(quantity))
+        - `min_price`: Precio mínimo observado (low)
+        - `max_price`: Precio máximo observado (high)
+        - `first_price`: Precio inicial o de apertura de la ventana (min_by(price, event_time))
+        - `last_price`: Último precio observado o cierre provisional (max_by(price, event_time))
+        - `trades_count`: Cantidad de transacciones registradas en la ventana
+        - `price_change_pct`: Variación porcentual ((last - first) / first) * 100
+        - `is_provisional`: Indicador booleano `True` para Serving Layer (US-21)
+        - `computed_at`: Marca de tiempo en que se generó el agregado
+    """
+    window_col = F.window(F.col("event_time"), window_duration, slide_duration)
+
+    aggregated = (
+        df.groupBy(window_col, F.col("symbol"))
+        .agg(
+            F.sum("quantity").alias("volume"),
+            F.min("price").alias("min_price"),
+            F.max("price").alias("max_price"),
+            F.min_by("price", "event_time").alias("first_price"),
+            F.max_by("price", "event_time").alias("last_price"),
+            F.count("event_id").alias("trades_count"),
+        )
+    )
+
+    first_price_col = F.col("first_price")
+    last_price_col = F.col("last_price")
+
+    pct_change_expr = F.when(
+        (first_price_col.isNotNull()) & (first_price_col > 0.0),
+        F.round(((last_price_col - first_price_col) / first_price_col) * 100.0, 4),
+    ).otherwise(F.lit(0.0))
+
+    metrics_df = (
+        aggregated
+        .withColumn("window_start", F.col("window.start"))
+        .withColumn("window_end", F.col("window.end"))
+        .withColumn("price_change_pct", pct_change_expr)
+        .withColumn("is_provisional", F.lit(True))
+        .withColumn("computed_at", F.current_timestamp())
+        .drop("window")
+    )
+
+    return metrics_df
+
+
+# ==============================================================================
 # Formato de Salida para Dead-Letter Queue (US-18: Criterio 3)
 # ==============================================================================
 def format_dlq_stream(classified_df: DataFrame) -> DataFrame:
@@ -321,7 +431,38 @@ def format_dlq_stream(classified_df: DataFrame) -> DataFrame:
 
 
 # ==============================================================================
-# Construcción del Pipeline de Structured Streaming
+# Formato de Salida para Métricas en Kafka (US-19: Criterio 3)
+# ==============================================================================
+def format_metrics_for_kafka(metrics_df: DataFrame) -> DataFrame:
+    """
+    Prepara las métricas calculadas para emitirse hacia Kafka topic `market.metrics` (US-19, Criterio 3).
+
+    - `key`: Símbolo del activo (ej. BTCUSDT) para garantizar particionado determinista.
+    - `value`: JSON serializado con las métricas de la ventana y el indicador `is_provisional = true`.
+    """
+    payload_struct = F.struct(
+        F.col("symbol"),
+        F.date_format(F.col("window_start"), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").alias("window_start"),
+        F.date_format(F.col("window_end"), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").alias("window_end"),
+        F.col("first_price"),
+        F.col("last_price"),
+        F.col("min_price"),
+        F.col("max_price"),
+        F.col("volume"),
+        F.col("trades_count"),
+        F.col("price_change_pct"),
+        F.col("is_provisional"),
+        F.date_format(F.col("computed_at"), "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").alias("computed_at"),
+    )
+
+    return metrics_df.select(
+        F.col("symbol").cast("string").alias("key"),
+        F.to_json(payload_struct).alias("value"),
+    )
+
+
+# ==============================================================================
+# Sinks de Salida y Consultas de Streaming
 # ==============================================================================
 def create_kafka_read_stream(
     spark: SparkSession,
@@ -361,22 +502,84 @@ def start_dlq_query(
     return writer.start()
 
 
+def start_metrics_kafka_query(
+    metrics_kafka_df: DataFrame,
+    bootstrap_servers: str,
+    metrics_topic: str = DEFAULT_METRICS_TOPIC,
+    checkpoint_location: str = None,
+    output_mode: str = DEFAULT_METRICS_OUTPUT_MODE,
+):
+    """
+    Lanza la consulta de streaming que publica continuamente las métricas hacia Kafka `market.metrics`
+    (US-19, Criterio 3). Admite modo 'update' (provisionales en tiempo real) y 'append' (cierre de ventana).
+    """
+    writer = (
+        metrics_kafka_df.writeStream
+        .format("kafka")
+        .option("kafka.bootstrap.servers", bootstrap_servers)
+        .option("topic", metrics_topic)
+        .outputMode(output_mode)
+    )
+    if checkpoint_location:
+        writer = writer.option("checkpointLocation", checkpoint_location)
+
+    return writer.start()
+
+
 def start_console_query(
     stream_df: DataFrame,
     checkpoint_location: str = None,
-    query_name: str = "valid_market_events",
+    query_name: str = "speed_metrics_events",
+    output_mode: str = "update",
 ):
     """Consulta auxiliar de consola para depuración local o monitoreo."""
     writer = (
         stream_df.writeStream
         .format("console")
-        .outputMode("append")
+        .outputMode(output_mode)
         .queryName(query_name)
     )
     if checkpoint_location:
         writer = writer.option("checkpointLocation", checkpoint_location)
 
     return writer.start()
+
+
+# ==============================================================================
+# Pipeline Completo de Speed Layer
+# ==============================================================================
+def build_speed_layer_pipeline(
+    raw_df: DataFrame,
+    watermark_delay: str = DEFAULT_WATERMARK_DELAY,
+    window_duration: str = DEFAULT_WINDOW_DURATION,
+    slide_duration: str = DEFAULT_SLIDE_DURATION,
+):
+    """
+    Construye las etapas analíticas de la capa de velocidad (Speed Layer):
+    1. Parseo y tipado estricto (US-18)
+    2. Aislamiento y preparación de DLQ (US-18)
+    3. Aplicación de watermark sobre event_time (US-18)
+    4. Deduplicación stateful en tiempo real (US-19)
+    5. Agregación en ventanas deslizantes (US-19)
+    6. Formateo de salida para topic Kafka (US-19)
+
+    Retorna la tupla `(dlq_stream, metrics_kafka_stream, metrics_raw_stream)`.
+    """
+    classified = classify_and_parse_events(raw_df)
+    dlq_stream = format_dlq_stream(classified)
+
+    valid = extract_valid_events(classified)
+    watermarked = apply_watermark(valid, watermark_delay=watermark_delay)
+
+    deduplicated = deduplicate_streaming_events(watermarked)
+    metrics_stream = compute_sliding_window_metrics(
+        deduplicated,
+        window_duration=window_duration,
+        slide_duration=slide_duration,
+    )
+    metrics_kafka = format_metrics_for_kafka(metrics_stream)
+
+    return dlq_stream, metrics_kafka, metrics_stream
 
 
 # ==============================================================================
@@ -387,11 +590,15 @@ def main(argv=None):
     args = parse_args(argv)
 
     print("=" * 70)
-    print("🚀 INICIANDO SPARK STRUCTURED STREAMING (US-18: Speed Layer)")
+    print("🚀 INICIANDO SPARK STRUCTURED STREAMING (US-18 / US-19: Speed Layer)")
     print(f"  Kafka Bootstrap:    {args.bootstrap_servers}")
     print(f"  Input Topic:        {args.input_topic}")
     print(f"  DLQ Topic:          {args.dlq_topic}")
+    print(f"  Metrics Topic:      {args.metrics_topic}")
     print(f"  Watermark Delay:    {args.watermark_delay}")
+    print(f"  Window Duration:    {args.window_duration}")
+    print(f"  Slide Duration:     {args.slide_duration}")
+    print(f"  Metrics Mode:       {args.metrics_output_mode}")
     print(f"  Starting Offsets:   {args.starting_offsets}")
     print(f"  Checkpoint Dir:     {args.checkpoint_dir}")
     print("=" * 70)
@@ -413,11 +620,15 @@ def main(argv=None):
         starting_offsets=args.starting_offsets,
     )
 
-    # 2. Parseo, tipado estricto y clasificación de anomalías
-    classified_stream = classify_and_parse_events(raw_stream)
+    # 2. Pipeline analítico completo (US-18 + US-19)
+    dlq_stream, metrics_kafka_stream, metrics_raw = build_speed_layer_pipeline(
+        raw_df=raw_stream,
+        watermark_delay=args.watermark_delay,
+        window_duration=args.window_duration,
+        slide_duration=args.slide_duration,
+    )
 
-    # 3. Rama DLQ: enrutamiento de mensajes fallidos a Kafka
-    dlq_stream = format_dlq_stream(classified_stream)
+    # 3. Rama DLQ: enrutamiento de anomalías a Kafka market.dlq
     dlq_checkpoint = os.path.join(args.checkpoint_dir, "dlq")
     dlq_query = start_dlq_query(
         dlq_df=dlq_stream,
@@ -427,20 +638,28 @@ def main(argv=None):
     )
     print(f"📡 Query DLQ activa hacia topic '{args.dlq_topic}' (Query ID: {dlq_query.id})")
 
-    # 4. Rama Válida: extracción y aplicación de Watermark explícito
-    valid_stream = extract_valid_events(classified_stream)
-    watermarked_stream = apply_watermark(
-        valid_stream,
-        watermark_delay=args.watermark_delay,
+    # 4. Rama de Métricas: emisión a Kafka market.metrics
+    metrics_checkpoint = os.path.join(args.checkpoint_dir, "metrics")
+    metrics_query = start_metrics_kafka_query(
+        metrics_kafka_df=metrics_kafka_stream,
+        bootstrap_servers=args.bootstrap_servers,
+        metrics_topic=args.metrics_topic,
+        checkpoint_location=metrics_checkpoint,
+        output_mode=args.metrics_output_mode,
+    )
+    print(
+        f"⚡ Query Métricas activa hacia topic '{args.metrics_topic}' "
+        f"[modo: {args.metrics_output_mode}] (Query ID: {metrics_query.id})"
     )
 
-    # 5. Salida principal (consola en dev/test o paso a agregaciones de US-19)
-    valid_checkpoint = os.path.join(args.checkpoint_dir, "valid")
-    valid_query = start_console_query(
-        stream_df=watermarked_stream,
-        checkpoint_location=valid_checkpoint,
-    )
-    print(f"⚡ Query Principal activa con watermark '{args.watermark_delay}' (Query ID: {valid_query.id})")
+    # 5. Monitoreo por consola si fue solicitado
+    if args.console_sink:
+        console_checkpoint = os.path.join(args.checkpoint_dir, "console")
+        start_console_query(
+            stream_df=metrics_raw,
+            checkpoint_location=console_checkpoint,
+            output_mode=args.metrics_output_mode,
+        )
 
     try:
         spark.streams.awaitAnyTermination()
