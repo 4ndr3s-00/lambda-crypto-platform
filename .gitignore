@@ -69,3 +69,9 @@ Thumbs.db
 # Ollama local cache
 ollama-models/
 .pytest_cache/
+
+# RAG generated index
+metadata/rag_index.json
+metadata/rag_index.chroma/
+.pytest_cache/
+

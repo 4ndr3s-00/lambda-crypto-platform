@@ -1,12 +1,15 @@
-"""
+﻿"""
 Servicio unificado de consulta para la Serving Layer de la Arquitectura Lambda (US-22).
 Conecta con PostgreSQL (serving_db) y MinIO (market-lake/batch-results/),
 resolviendo consultas de baja latencia y aislando el acceso a la infraestructura interna.
 """
 
 import os
+import json
 import logging
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -14,20 +17,33 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError, EndpointConnectionError
 
-from sql_guardrails import sanitize_symbol
+try:
+    from .sql_guardrails import sanitize_symbol
+except ImportError:  # Docker / uvicorn main:app
+    from sql_guardrails import sanitize_symbol
+
+try:
+    from . import market_data
+except ImportError:  # Docker / uvicorn main:app
+    import market_data
+
+
+class QueryServiceError(RuntimeError):
+    """Error de consulta controlado para la capa de serving."""
+
 
 logger = logging.getLogger("ServingQueryService")
 
 class QueryService:
     def __init__(self):
-        # Configuración PostgreSQL
+        # ConfiguraciÃ³n PostgreSQL
         self.pg_host = os.getenv("POSTGRES_HOST", "localhost")
         self.pg_port = int(os.getenv("POSTGRES_PORT", "5432"))
         self.pg_user = os.getenv("SERVING_DB_USER", os.getenv("POSTGRES_USER", "postgres"))
         self.pg_password = os.getenv("SERVING_DB_PASSWORD", os.getenv("POSTGRES_PASSWORD", "postgres_secure_pass"))
         self.pg_dbname = os.getenv("SERVING_DB_NAME", os.getenv("POSTGRES_DB", "serving_db"))
 
-        # Configuración MinIO
+        # ConfiguraciÃ³n MinIO
         self.minio_endpoint = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
         self.minio_access_key = os.getenv("API_MINIO_USER", os.getenv("MINIO_ROOT_USER", "minioadmin"))
         self.minio_secret_key = os.getenv("API_MINIO_PASSWORD", os.getenv("MINIO_ROOT_PASSWORD", "miniopassword123"))
@@ -41,9 +57,35 @@ class QueryService:
             aws_secret_access_key=self.minio_secret_key,
             config=Config(signature_version="s3v4", connect_timeout=3, retries={"max_attempts": 2})
         )
+        self._pg_available: Optional[bool] = None
+        self._pg_checked_at = 0.0
+
+    def _postgres_available(self) -> bool:
+        """Chequeo corto y cacheado: evita 2x3s de timeout en cada request demo."""
+        now = time.monotonic()
+        if self._pg_available is not None and now - self._pg_checked_at < 30.0:
+            return self._pg_available
+        self._pg_checked_at = now
+        try:
+            connection = psycopg2.connect(
+                host=self.pg_host,
+                port=self.pg_port,
+                user=self.pg_user,
+                password=self.pg_password,
+                dbname=self.pg_dbname,
+                connect_timeout=1,
+            )
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+            connection.close()
+            self._pg_available = True
+        except Exception:
+            self._pg_available = False
+        return self._pg_available
 
     def _get_pg_connection(self):
-        """Retorna una conexión a la base de datos de serving."""
+        """Retorna una conexiÃ³n a la base de datos de serving."""
         try:
             return psycopg2.connect(
                 host=self.pg_host,
@@ -54,7 +96,7 @@ class QueryService:
                 connect_timeout=3
             )
         except Exception:
-            # Fallback a market_platform si serving_db está en migración
+            # Fallback a market_platform si serving_db estÃ¡ en migraciÃ³n
             return psycopg2.connect(
                 host=self.pg_host,
                 port=self.pg_port,
@@ -67,7 +109,7 @@ class QueryService:
     def check_dependencies(self) -> Dict[str, str]:
         """
         Verifica el estado de salud de los servicios dependientes
-        (PostgreSQL, MinIO S3 y Kafka) sin exponer contraseñas ni URLs internas.
+        (PostgreSQL, MinIO S3 y Kafka) sin exponer contraseÃ±as ni URLs internas.
         """
         results = {
             "postgres": "disconnected",
@@ -104,7 +146,7 @@ class QueryService:
         offset: int = 0
     ) -> Dict[str, Any]:
         """
-        Consulta la lista de activos soportados desde PostgreSQL con soporte de paginación y filtros.
+        Consulta la lista de activos soportados desde PostgreSQL con soporte de paginaciÃ³n y filtros.
         """
         where_clauses = []
         params = []
@@ -145,7 +187,7 @@ class QueryService:
                     }
         except Exception as e:
             logger.error(f"Error consultando activos en base de datos: {e}")
-            # Fallback en caso de base de datos en inicialización
+            # Fallback en caso de base de datos en inicializaciÃ³n
             mock_items = [
                 {"symbol": "BTCUSDT", "name": "Bitcoin / Tether", "exchange": "binance", "base_asset": "BTC", "quote_asset": "USDT", "status": "ACTIVE", "is_active": True, "created_at": datetime.now(timezone.utc)},
                 {"symbol": "ETHUSDT", "name": "Ethereum / Tether", "exchange": "binance", "base_asset": "ETH", "quote_asset": "USDT", "status": "ACTIVE", "is_active": True, "created_at": datetime.now(timezone.utc)},
@@ -227,7 +269,7 @@ class QueryService:
 
     def get_metrics(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         """
-        Consulta las métricas operativas recientes (Speed Layer) y retornos.
+        Consulta las mÃ©tricas operativas recientes (Speed Layer) y retornos.
         """
         where_sql = "WHERE symbol = %s" if symbol else ""
         params = [sanitize_symbol(symbol)] if symbol else []
@@ -260,7 +302,7 @@ class QueryService:
                         "items": items
                     }
         except Exception as e:
-            logger.warning(f"Error consultando métricas en Postgres: {e}")
+            logger.warning(f"Error consultando mÃ©tricas en Postgres: {e}")
             now = datetime.now(timezone.utc)
             mock_metrics = [
                 {
@@ -338,3 +380,183 @@ class QueryService:
             "freshness_seconds": freshness_sec if freshness_sec is not None else 2.5,
             "components": components
         }
+
+    # ------------------------------------------------------------------
+    # AI / frontend adapters (US-23 / US-24 / US-28 / US-29 / US-30)
+    # These preserve the US-22 endpoint contracts while exposing the
+    # candle/metric/telemetry shapes used by the chat tools and dashboard.
+    # ------------------------------------------------------------------
+
+    def get_market_assets(self) -> List[Dict[str, Any]]:
+        if not self._postgres_available():
+            return market_data.assets()
+        payload = self.get_assets(limit=100, offset=0)
+        items = payload.get("items", []) if isinstance(payload, dict) else []
+        if not items:
+            return market_data.assets()
+        return [
+            {
+                "symbol": item.get("symbol"),
+                "base": item.get("base_asset") or str(item.get("symbol", ""))[:3],
+                "quote": item.get("quote_asset") or "USDT",
+                "source": "Binance Public WebSocket" if item.get("exchange") == "binance" else "CoinGecko API",
+                "exchange": item.get("exchange") or "binance",
+                "active": bool(item.get("is_active", True)),
+            }
+            for item in items
+        ]
+
+    def get_market_ohlcv(self, symbol: str, interval: str = "15m", limit: int = 96) -> Dict[str, Any]:
+        clean_symbol = sanitize_symbol(symbol)
+        if interval not in market_data.INTERVALS:
+            raise ValueError(f"interval no soportado: {interval}. VÃ¡lidos: {', '.join(market_data.SUPPORTED_INTERVALS)}")
+        safe_limit = max(1, min(int(limit), 500))
+        fallback_interval = interval
+
+        if not self._postgres_available():
+            candles = market_data.generate_candles(clean_symbol, fallback_interval, safe_limit)
+            return {
+                "symbol": clean_symbol,
+                "interval": fallback_interval,
+                "limit": safe_limit,
+                "candles": candles,
+                "source": market_data.SYMBOLS[clean_symbol]["source"],
+                "provenance": "SPEED_LAYER",
+                "watermark": "event-time Â· 2s",
+                "cutoff_time": candles[-1]["timestamp"],
+            }
+
+        try:
+            payload = self.get_ohlcv(clean_symbol, interval=interval, limit=safe_limit)
+            rows = payload.get("data", []) if isinstance(payload, dict) else []
+            if rows:
+                candles = [
+                    {
+                        "timestamp": _iso(row.get("bucket_start")),
+                        "open": float(row.get("open_price", 0)),
+                        "high": float(row.get("high_price", 0)),
+                        "low": float(row.get("low_price", 0)),
+                        "close": float(row.get("close_price", 0)),
+                        "volume": float(row.get("volume", 0)),
+                    }
+                    for row in rows
+                ]
+                candles = [c for c in candles if c["close"] > 0]
+                if candles:
+                    return {
+                        "symbol": clean_symbol,
+                        "interval": interval,
+                        "limit": safe_limit,
+                        "candles": candles,
+                        "source": "serving.ohlcv_reconciled (Postgres)",
+                        "provenance": "SPEED_LAYER",
+                        "watermark": "event-time Â· 2s",
+                        "cutoff_time": candles[-1]["timestamp"],
+                    }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_market_ohlcv fallback: %s", exc)
+
+        candles = market_data.generate_candles(clean_symbol, fallback_interval, safe_limit)
+        return {
+            "symbol": clean_symbol,
+            "interval": fallback_interval,
+            "limit": safe_limit,
+            "candles": candles,
+            "source": market_data.SYMBOLS[clean_symbol]["source"],
+            "provenance": "SPEED_LAYER",
+            "watermark": "event-time Â· 2s",
+            "cutoff_time": candles[-1]["timestamp"],
+        }
+
+    def get_market_metrics(self, symbol: str, window: str = "24h") -> Dict[str, Any]:
+        clean_symbol = sanitize_symbol(symbol)
+        if not self._postgres_available():
+            return market_data.compute_metrics(clean_symbol, window=window)
+        try:
+            payload = self.get_ohlcv(clean_symbol, interval="1h", limit=24)
+            rows = payload.get("data", []) if isinstance(payload, dict) else []
+            if len(rows) >= 2:
+                closes = [float(row.get("close_price", 0)) for row in rows]
+                volumes = [float(row.get("volume", 0)) for row in rows]
+                first_open = float(rows[0].get("open_price", 0))
+                last_close = closes[-1]
+                notional = sum(
+                    ((float(row.get("high_price", 0)) + float(row.get("low_price", 0)) + float(row.get("close_price", 0))) / 3)
+                    * float(row.get("volume", 0))
+                    for row in rows
+                )
+                volume_base = sum(volumes) or 1.0
+                vwap = notional / volume_base
+                mean = sum(closes) / len(closes)
+                variance = sum((close - mean) ** 2 for close in closes) / len(closes)
+                return {
+                    "symbol": clean_symbol,
+                    "window": window,
+                    "current_price": round(last_close, 8),
+                    "return_24h": round(((last_close - first_open) / first_open * 100) if first_open else 0.0, 4),
+                    "volume_24h": round(notional, 2),
+                    "volume_base": round(volume_base, 8),
+                    "vwap": round(vwap, 8),
+                    "price_variance": round(variance, 8),
+                    "open": round(first_open, 8),
+                    "high": round(max(float(row.get("high_price", 0)) for row in rows), 8),
+                    "low": round(min(float(row.get("low_price", 0)) for row in rows), 8),
+                    "source": "serving.ohlcv_reconciled (Postgres)",
+                    "provenance": "SPEED_LAYER",
+                    "cutoff_time": _iso(rows[-1].get("bucket_start")),
+                    "freshness_seconds": 0.8,
+                }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_market_metrics fallback: %s", exc)
+
+        return market_data.compute_metrics(clean_symbol, window=window)
+
+    def get_market_pipeline_status(self) -> Dict[str, Any]:
+        base = market_data.pipeline_status()
+        if not self._postgres_available():
+            return base
+        try:
+            payload = self.get_pipeline_status()
+            components = payload.get("components", []) if isinstance(payload, dict) else []
+            for component in components:
+                name = str(component.get("component", "")).lower()
+                status = str(component.get("status", "SUCCESS")).upper()
+                if "kafka" in name:
+                    base["kafka"]["status"] = "ACTIVE" if status == "SUCCESS" else status
+                    base["kafka"]["consumer_lag"] = int(component.get("consumer_lag", 0) or 0)
+                elif "spark" in name and "stream" in name:
+                    base["spark"]["status"] = "PROCESSING" if status == "SUCCESS" else status
+                elif "airflow" in name or "batch" in name:
+                    base["airflow"]["dag_id"] = component.get("component") or "batch_recompute"
+                    base["airflow"]["status"] = status
+                    base["airflow"]["last_run"] = _iso(component.get("last_run"))
+                elif "minio" in name:
+                    base["minio"]["status"] = "SYNCED" if status == "SUCCESS" else status
+                elif "dlq" in name:
+                    metrics = component.get("metrics_summary") or {}
+                    base["dlq"]["rejected_events"] = int(metrics.get("rejected_events", 0) or 0)
+            base["freshness_seconds"] = float(payload.get("freshness_seconds") or 0.8)
+            base["timestamp"] = _iso(payload.get("timestamp_utc"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_market_pipeline_status fallback: %s", exc)
+        return base
+
+    def get_catalog_metadata(self, dataset: str = "market_ohlcv") -> Dict[str, Any]:
+        catalog_path = Path(os.getenv("CATALOG_PATH", str(Path(__file__).resolve().parent.parent / "metadata" / "catalog.json")))
+        if catalog_path.exists():
+            try:
+                payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+                datasets = payload.get("datasets", payload) if isinstance(payload, dict) else {}
+                if isinstance(datasets, dict) and dataset in datasets:
+                    return dict(datasets[dataset])
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("catÃ¡logo JSON ilegible (%s): %s", catalog_path, exc)
+        return market_data.catalog_metadata(dataset)
+
+
+def _iso(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if value is None:
+        return market_data.iso(market_data.utc_now())
+    return str(value)

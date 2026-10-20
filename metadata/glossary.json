@@ -1,0 +1,19 @@
+{
+  "terms": {
+    "OHLCV": "Open, High, Low, Close, Volume. Agregación de velas usada por la capa Serving y el dashboard.",
+    "VWAP": "Volume Weighted Average Price. Precio promedio ponderado por volumen en una ventana temporal.",
+    "Watermark": "Umbral de event-time que tolera eventos tardíos antes de cerrar una ventana de streaming.",
+    "Event-time": "Marca temporal del evento en la fuente, no la hora de llegada al sistema.",
+    "Batch Layer": "Capa de precisión que recalcula históricos completos sobre MinIO/Parquet con Spark Batch y Airflow.",
+    "Speed Layer": "Capa de baja latencia que procesa eventos recientes con Spark Structured Streaming y Kafka.",
+    "Serving Layer": "Capa FastAPI que reconcilia Batch y Speed, expone endpoints y alimenta el dashboard.",
+    "DLQ": "Dead Letter Queue. Topic de cuarentena para eventos que violan el contrato o fallan el procesamiento.",
+    "Consumer lag": "Diferencia entre el último offset producido y el último offset confirmado por un consumidor Kafka.",
+    "Lambda Architecture": "Patrón que combina Batch Layer, Speed Layer y Serving Layer sin capas Medallion.",
+    "Cutoff time": "Timestamp UTC que delimita la frescura máxima de los datos usados en una respuesta.",
+    "Idempotencia": "Propiedad que permite reprocesar un evento sin duplicar el resultado.",
+    "RAG": "Retrieval-Augmented Generation. Recupera documentación relevante y la inyecta al prompt del LLM.",
+    "Guardrail SQL": "Validador de solo lectura que permite SELECT, tablas autorizadas y LIMIT <= 100.",
+    "Qwen2.5": "Modelo de lenguaje local servido por Ollama para el panel conversacional de IQ Analyzer."
+  }
+}
