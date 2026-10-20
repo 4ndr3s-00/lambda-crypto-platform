@@ -17,10 +17,14 @@ HEADER = "timestamp,symbol,price,quantity\n"
 class ListSink:
     def __init__(self):
         self.events = []
+        self.rejected = []
 
-    def publish(self, event):
+    def publish(self, event, component="test"):
         self.events.append(event)
         return True
+
+    def reject(self, original, reason, component, source=None):
+        self.rejected.append((original, reason, component))
 
 
 def write(tmp_path, name, content):
@@ -129,12 +133,15 @@ def test_destino_minio_agrupa_por_fecha_en_historical(tmp_path):
     assert len(first["Body"].decode().splitlines()) == 2
 
 
-def test_minio_no_escribe_eventos_invalidos(tmp_path):
+def test_minio_envia_eventos_invalidos_a_cuarentena(tmp_path):
     path = write(tmp_path, "d.csv", HEADER + "2026-09-01T10:00:00Z,BTCUSDT,-1,1\n")
     s3 = MagicMock()
     sink = MinioSink("binance", "d", client=s3)
     FileLoaderConnector(sink, path, "binance").run()
-    assert sink.flush() == [] and not s3.put_object.called
+    keys = sink.flush()
+    # Nada en el lago histórico; el rechazo queda en cuarentena (US-09)
+    assert all(k.startswith("market-quarantine/") for k in keys) and len(keys) == 1
+    assert s3.put_object.call_args.kwargs["Bucket"] == "market-quarantine"
 
 
 def test_destino_kafka_usa_market_events_con_clave(tmp_path):

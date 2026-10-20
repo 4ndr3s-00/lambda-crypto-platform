@@ -27,11 +27,13 @@ try:
     from ingestion.connectors.base_connector import (
         BaseConnector, EventPublisher, SCHEMA_VERSION, ms_to_iso, utc_iso,
     )
+    from ingestion.contracts.dlq_message import build_dlq_message, serialize
     from ingestion.contracts.validator import validate_event
 except ImportError:  # ejecución desde ingestion/
     from connectors.base_connector import (
         BaseConnector, EventPublisher, SCHEMA_VERSION, ms_to_iso, utc_iso,
     )
+    from contracts.dlq_message import build_dlq_message, serialize
     from contracts.validator import validate_event
 
 from jsonschema.exceptions import ValidationError
@@ -40,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 REQUIRED_COLUMNS = ("timestamp", "symbol", "price", "quantity")
 MINIO_BUCKET = "market-lake"
+QUARANTINE_BUCKET = "market-quarantine"
 
 
 def parse_timestamp_ms(value: Any) -> int:
@@ -74,6 +77,7 @@ def _to_float(row: Dict[str, Any], column: str) -> float:
 
 class FileLoaderConnector(BaseConnector):
     source = "csv_backfill"
+    component = "csv_loader"
 
     def __init__(self, publisher: EventPublisher, path: Path, origin: str):
         super().__init__(publisher)
@@ -137,14 +141,16 @@ class FileLoaderConnector(BaseConnector):
         self.stats["unparseable"] = 0
         for raw in self.fetch():
             self.stats["raw"] += 1
+            line_no, row = raw
             try:
                 event = self.normalize(raw)
             except ValueError as err:
-                # Una fila mala no tumba la carga: se informa con su número de fila
-                logger.warning("Fila %d descartada: %s", raw[0], err)
+                # Una fila mala no tumba la carga: va a la DLQ con su número de fila
+                logger.warning("Fila %d rechazada: %s", line_no, err)
+                self.publisher.reject(row, f"fila {line_no}: {err}", self.component, self.source)
                 self.stats["unparseable"] += 1
                 continue
-            if self.publisher.publish(event):
+            if self.publisher.publish(event, component=self.component):
                 self.stats["published"] += 1
             else:
                 self.stats["rejected"] += 1
@@ -159,6 +165,7 @@ class MinioSink:
         self.file_stem = file_stem
         self._client = client
         self._by_date: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        self._rejected: List[Dict[str, Any]] = []
 
     def _s3(self):
         if self._client is None:
@@ -175,14 +182,19 @@ class MinioSink:
             )
         return self._client
 
-    def publish(self, event: Dict[str, Any]) -> bool:
+    def publish(self, event: Dict[str, Any], component: str = "csv_loader") -> bool:
         try:
             validate_event(event)
         except ValidationError as err:
-            logger.warning("Evento rechazado por el contrato: %s", err.message)
+            self.reject(event, err.message, component)
             return False
         self._by_date[event["event_time"][:10]].append(event)
         return True
+
+    def reject(self, original: Any, reason: str, component: str, source: Optional[str] = None) -> None:
+        """Sin Kafka no hay DLQ: los rechazos se guardan en el bucket de cuarentena."""
+        logger.warning("Rechazado por %s: %s", component, reason)
+        self._rejected.append(build_dlq_message(original, reason, component, source or self.source))
 
     def flush(self) -> List[str]:
         keys = []
@@ -194,6 +206,13 @@ class MinioSink:
             self._s3().put_object(Bucket=MINIO_BUCKET, Key=key, Body=body, ContentType="application/x-ndjson")
             keys.append(key)
         self._by_date.clear()
+        if self._rejected:
+            today = datetime.now(timezone.utc).date().isoformat()
+            key = f"source={self.source}/date={today}/{self.file_stem}.rejected.json"
+            body = "\n".join(serialize(m) for m in self._rejected).encode("utf-8")
+            self._s3().put_object(Bucket=QUARANTINE_BUCKET, Key=key, Body=body, ContentType="application/x-ndjson")
+            keys.append(f"{QUARANTINE_BUCKET}/{key}")
+            self._rejected.clear()
         return keys
 
     def close(self) -> None:
@@ -230,7 +249,7 @@ def main(argv=None) -> int:
         stats = FileLoaderConnector(sink, path, args.source.lower()).run()
         if args.target == "minio":
             for key in sink.flush():
-                logger.info("Escrito s3://%s/%s", MINIO_BUCKET, key)
+                logger.info("Escrito s3://%s", key if key.startswith(QUARANTINE_BUCKET) else f"{MINIO_BUCKET}/{key}")
         else:
             sink.flush()
     finally:

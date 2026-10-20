@@ -13,8 +13,10 @@ from typing import Any, Dict, Optional
 from jsonschema.exceptions import ValidationError
 
 try:
+    from ingestion.contracts.dlq_message import build_dlq_message, dlq_key
     from ingestion.contracts.validator import validate_event
 except ImportError:  # ejecución desde ingestion/
+    from contracts.dlq_message import build_dlq_message, dlq_key
     from contracts.validator import validate_event
 
 logger = logging.getLogger(__name__)
@@ -51,17 +53,21 @@ class MarketEventProducer:
             )
         self._producer = producer
 
-    def publish(self, event: Dict[str, Any]) -> bool:
+    def publish(self, event: Dict[str, Any], component: str = "ingestion") -> bool:
         """True si se publicó en `market.events`; False si se desvió a la DLQ."""
         try:
             validate_event(event)
         except ValidationError as err:
-            logger.warning("Evento rechazado por el contrato: %s", err.message)
-            key = f"{event.get('exchange', 'unknown')}|{event.get('symbol', 'unknown')}"
-            self._producer.send(self.dlq_topic, key=key, value={"error": err.message, "event": event})
+            self.reject(event, err.message, component)
             return False
         self._producer.send(self.topic, key=partition_key(event), value=event)
         return True
+
+    def reject(self, original: Any, reason: str, component: str, source: Optional[str] = None) -> None:
+        """Envía a `market.dlq` el payload original intacto con los metadatos del rechazo."""
+        logger.warning("Rechazado por %s: %s", component, reason)
+        message = build_dlq_message(original, reason, component, source)
+        self._producer.send(self.dlq_topic, key=dlq_key(original), value=message)
 
     def flush(self) -> None:
         self._producer.flush()

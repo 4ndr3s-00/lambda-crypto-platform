@@ -19,10 +19,14 @@ MIN = 60_000
 class ListPublisher:
     def __init__(self):
         self.events = []
+        self.rejected = []
 
-    def publish(self, event):
+    def publish(self, event, component="test"):
         self.events.append(event)
         return True
+
+    def reject(self, original, reason, component, source=None):
+        self.rejected.append((original, reason, component))
 
 
 def kline(open_time, close="100.5", volume="2"):
@@ -271,4 +275,6 @@ def test_productor_envia_eventos_invalidos_a_la_dlq():
     event["price"] = -1
     assert producer.publish(event) is False
     assert kafka.send.call_args.args == ("market.dlq",)
-    assert "error" in kafka.send.call_args.kwargs["value"]
+    message = kafka.send.call_args.kwargs["value"]
+    assert message["original_event"] == event
+    assert message["failed_component"] == "ingestion"

@@ -27,7 +27,9 @@ SCHEMA_VERSION = "2.0.0"
 class EventPublisher(Protocol):
     """Destino de los eventos normalizados (productor Kafka o un doble de pruebas)."""
 
-    def publish(self, event: Dict[str, Any]) -> bool: ...
+    def publish(self, event: Dict[str, Any], component: str = "ingestion") -> bool: ...
+
+    def reject(self, original: Any, reason: str, component: str, source: Optional[str] = None) -> None: ...
 
 
 class TokenBucket:
@@ -102,6 +104,8 @@ class BaseConnector(ABC):
     source: str
     #: valor del campo `exchange` del contrato
     exchange: str
+    #: nombre con el que este conector aparece como `failed_component` en la DLQ
+    component: str = "connector"
 
     def __init__(self, publisher: EventPublisher):
         self.publisher = publisher
@@ -118,11 +122,17 @@ class BaseConnector(ABC):
     def run(self) -> Dict[str, int]:
         for raw in self.fetch():
             self.stats["raw"] += 1
-            event = self.normalize(raw)
+            try:
+                event = self.normalize(raw)
+            except (ValueError, KeyError, IndexError, TypeError) as err:
+                # Payload corrupto o incompleto: no se descarta en silencio, va a la DLQ
+                self.publisher.reject(raw, f"payload no normalizable: {err}", self.component, self.source)
+                self.stats["rejected"] += 1
+                continue
             if event is None:
                 continue
             # El publisher valida contra el contrato y enruta lo inválido a la DLQ
-            if self.publisher.publish(event):
+            if self.publisher.publish(event, component=self.component):
                 self.stats["published"] += 1
             else:
                 self.stats["rejected"] += 1

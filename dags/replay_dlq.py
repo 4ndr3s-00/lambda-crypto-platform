@@ -104,7 +104,7 @@ def unpack_dlq_payload(raw_message: Any) -> Tuple[Optional[Dict[str, Any]], Opti
     # Verificar si viene encapsulado con metadatos de fallo
     for envelope_key in ["original_event", "raw_payload", "event", "data"]:
         if envelope_key in payload and isinstance(payload[envelope_key], dict):
-            return payload[envelope_key], payload.get("error")
+            return payload[envelope_key], payload.get("error_reason") or payload.get("error")
 
     # Si no tiene envoltorio, el mensaje es el evento crudo
     return payload, None

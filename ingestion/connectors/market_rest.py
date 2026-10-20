@@ -90,6 +90,7 @@ class RateLimitedClient:
 class BinanceRestConnector(BaseConnector):
     source = "binance_rest"
     exchange = "binance"
+    component = "market_rest"
 
     def __init__(
         self,
@@ -170,6 +171,7 @@ class CoinGeckoRestConnector(BaseConnector):
 
     source = "coingecko_rest"
     exchange = "coingecko"
+    component = "market_rest"
 
     def __init__(
         self,
