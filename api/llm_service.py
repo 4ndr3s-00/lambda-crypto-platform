@@ -317,7 +317,7 @@ class LLMService:
             "model": self.settings.ollama_model,
             "messages": messages,
             "stream": False,
-            "options": {"temperature": 0.1, "num_predict": 700},
+            "options": {"temperature": 0.1, "num_predict": 320},
         }
         if tools:
             payload["tools"] = tools
