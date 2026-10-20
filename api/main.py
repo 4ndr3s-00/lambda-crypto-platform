@@ -205,7 +205,19 @@ def get_metrics(symbol: Optional[str] = Query(None)) -> dict[str, Any]:
     return query_service.get_metrics(symbol=clean_symbol)
 
 
-@app.get("/api/pipeline/status", response_model=PipelineStatusResponse, tags=["Observabilidad y Operaciones"])
+try:
+    from .auth import verify_admin_auth
+except ImportError:
+    from auth import verify_admin_auth
+from fastapi import Depends
+
+
+@app.get(
+    "/api/pipeline/status",
+    response_model=PipelineStatusResponse,
+    tags=["Observabilidad y Operaciones"],
+    dependencies=[Depends(verify_admin_auth)],
+)
 def get_pipeline_status() -> dict[str, Any]:
     return query_service.get_pipeline_status()
 
