@@ -73,6 +73,7 @@ services:
       CLUSTER_ID: ${KAFKA_CLUSTER_ID:-4L622nShT-2xMVuLqW6q3w}
     volumes:
       - kafka_data:/tmp/kraft-combined-logs
+      - ./kafka/check-consumer-lag.sh:/check-consumer-lag.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
       interval: 10s
