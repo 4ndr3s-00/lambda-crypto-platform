@@ -4,7 +4,7 @@
 
 | Topic | Particiones | Retención | Propósito |
 | :--- | :--- | :--- | :--- |
-| `market.events` | 3 | 7 días / 5 GB | Eventos crudos de mercado (ticks, trades) |
+| `market.events` | 4 | 7 días / 5 GB | Eventos crudos de mercado (ticks, trades) |
 | `market.ohlcv` | 4 | 3 días / 2 GB | Velas OHLCV calculadas en streaming |
 | `market.metrics` | 3 | 1 día / 1 GB | Métricas agregadas en tiempo real |
 | `market.dlq` | 3 | 14 días / 2 GB | Eventos inválidos o fuera de contrato |
