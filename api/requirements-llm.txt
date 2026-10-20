@@ -1,0 +1,5 @@
+# Optional RAG backend. The base API also works with the bundled TF-IDF
+# fallback, but install this file when explaining docs with ChromaDB:
+#   pip install -r api/requirements-llm.txt
+-r requirements.txt
+chromadb>=0.5.0,<0.6.0

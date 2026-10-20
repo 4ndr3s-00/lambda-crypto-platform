@@ -5,7 +5,7 @@
 COMPOSE_FILE = infra/docker-compose.yml
 ENV_FILE = .env
 
-.PHONY: help env up down restart ps logs logs-api logs-kafka logs-spark logs-airflow clean
+.PHONY: help env up up-all down restart ps logs logs-api logs-kafka logs-spark logs-airflow rag-index test clean
 
 help:
 	@echo "Comandos disponibles:"
@@ -16,6 +16,8 @@ help:
 	@echo "  make restart       Reinicia todos los servicios"
 	@echo "  make ps            Muestra el estado de los contenedores"
 	@echo "  make logs          Muestra logs combinados en tiempo real"
+	@echo "  make rag-index     Reconstruye el índice RAG de documentación y glosario"
+	@echo "  make test          Ejecuta la batería de pruebas unitarias"
 	@echo "  make clean         Detiene y elimina volúmenes y redes creadas"
 
 env:
@@ -54,6 +56,12 @@ logs-spark:
 
 logs-airflow:
 	docker compose -f $(COMPOSE_FILE) logs -f airflow
+
+rag-index:
+	python -m api.rag_indexer --rebuild
+
+test:
+	python -m pytest -q
 
 clean:
 	docker compose -f $(COMPOSE_FILE) down -v --remove-orphans

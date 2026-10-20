@@ -252,11 +252,19 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-miniopassword123}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b-instruct}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-60}
+      FRONTEND_DIR: /app/static
+      STATIC_DIR: /app/static
+      RAG_INDEX_PATH: /app/metadata/rag_index.json
+      RAG_DOCS_DIR: /app/metadata
+      CATALOG_PATH: /app/metadata/catalog.json
+      GLOSSARY_PATH: /app/metadata/glossary.json
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
-      - ../api:/app
+      - ../api:/app/api
       - ../frontend:/app/static:ro
+      - ../metadata:/app/metadata
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 10s
@@ -278,6 +286,27 @@ services:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
       - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+    networks:
+      - lambda-net
+
+  # Descarga idempotente del modelo Qwen2.5 al levantar el perfil llm.
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: lambda-ollama-init
+    profiles:
+      - llm
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "ollama pull ${OLLAMA_MODEL:-qwen2.5:3b-instruct}"]
+    restart: "no"
     networks:
       - lambda-net
 

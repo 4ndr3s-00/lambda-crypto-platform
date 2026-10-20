@@ -1,0 +1,48 @@
+{
+  "datasets": {
+    "market_ohlcv": {
+      "dataset": "market_ohlcv",
+      "storage_uri": "s3://market-lake/batch-results/metric=ohlcv/",
+      "owner": "Data Engineering & Market DataOps Team",
+      "schema_version": "v2.0 (idempotent, deduplicated)",
+      "retention": "Batch sin TTL · Speed 72h rolling",
+      "partitions": "event_date / symbol (Parquet, 12 partitions)",
+      "lineage": [
+        "Binance WS",
+        "Kafka topic: market.events",
+        "Spark Structured Streaming",
+        "MinIO s3://market-lake/batch-results/",
+        "Serving API"
+      ],
+      "quality": {
+        "completeness": 0.9997,
+        "duplicate_rate": 0.0,
+        "late_arrival_rate": 0.0004
+      },
+      "source": "governance.dataset_catalog",
+      "provenance": "BATCH_LAYER",
+      "cutoff_time": "2026-10-20T06:00:00Z"
+    },
+    "market_metrics": {
+      "dataset": "market_metrics",
+      "storage_uri": "s3://market-lake/batch-results/metric=returns/",
+      "owner": "Market Analytics Team",
+      "schema_version": "v2.0",
+      "retention": "Batch sin TTL",
+      "partitions": "event_date / symbol",
+      "lineage": [
+        "market_ohlcv",
+        "Spark Batch",
+        "Serving API"
+      ],
+      "quality": {
+        "completeness": 0.9995,
+        "duplicate_rate": 0.0,
+        "late_arrival_rate": 0.0002
+      },
+      "source": "governance.dataset_catalog",
+      "provenance": "BATCH_LAYER",
+      "cutoff_time": "2026-10-20T06:00:00Z"
+    }
+  }
+}
