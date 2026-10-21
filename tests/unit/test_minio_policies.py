@@ -179,16 +179,20 @@ def _init_heredoc(script_text: str, filename: str) -> str:
     return script_text[start:end].lstrip("\n")
 
 
-def test_spark_dlq_concede_get_object_a_ambas_definiciones():
+def test_spark_dlq_permite_leer_borrar_y_escribir_en_ambas_definiciones():
     """
-    Regresión: S3A ejecuta `getFileStatus` (HEAD) sobre el directorio de destino
-    antes de escribir en la DLQ. MinIO responde 403 —y no 404— cuando el rol no
-    tiene `s3:GetObject`, de modo que el job abortaba con AccessDeniedException
-    en `market-quarantine/date=...`.
+    Regresión: la escritura de la DLQ con `mode=overwrite` exige tres permisos
+    de S3A que la política de Spark no concedía:
 
-    La política de Spark existe en dos sitios (el JSON montado en `/policies` y
-    el heredoc que `init-buckets.sh` envía a `mc admin policy`); ambos deben
-    otorgar el permiso, o `make up` revierte el fix silenciosamente.
+    1. `GetObject` — S3A hace `getFileStatus` (HEAD) del directorio de destino
+       antes de escribir, y MinIO responde 403 —y no 404— sin ese permiso.
+    2. `DeleteObject` — el committer de S3A borra el directorio temporal
+       (`.spark-staging-*`) tras confirmar la escritura.
+    3. `PutObject`/`AbortMultipartUpload` — la escritura en sí.
+
+    La política de Spark existe en dos sitios (el JSON montado en `/policies`
+    y el heredoc que `init-buckets.sh` envía a `mc admin policy`); ambos deben
+    otorgar los permisos, o `make up` revierte el fix silenciosamente.
     """
     json_path = POLICIES_DIR / "spark-policy.json"
     heredoc = _init_heredoc(INIT_SCRIPT.read_text(), "spark-policy.json")
@@ -196,10 +200,8 @@ def test_spark_dlq_concede_get_object_a_ambas_definiciones():
     for origen, policy_text in (("spark-policy.json", json_path.read_text()),
                                 ("init-buckets.sh", heredoc)):
         actions = _spark_quarantine_actions(policy_text)
-        assert "s3:GetObject" in actions, (
-            f"{origen} no concede s3:GetObject sobre market-quarantine/*: "
-            f"S3A necesita el HEAD previo a la escritura de la DLQ."
-        )
-        assert "s3:PutObject" in actions, (
-            f"{origen} debe conservar la escritura de la DLQ."
-        )
+        for required in ("s3:GetObject", "s3:PutObject", "s3:DeleteObject"):
+            assert required in actions, (
+                f"{origen} no concede {required} sobre market-quarantine/*: "
+                f"el job Batch con --quarantine-invalid falla escribiendo la DLQ."
+            )

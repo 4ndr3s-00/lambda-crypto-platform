@@ -175,6 +175,7 @@ cat << 'EOF' > "${TMP_POLICIES_DIR}/spark-policy.json"
       "Action": [
         "s3:GetObject",
         "s3:PutObject",
+        "s3:DeleteObject",
         "s3:AbortMultipartUpload"
       ],
       "Resource": [
