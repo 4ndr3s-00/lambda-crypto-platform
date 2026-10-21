@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import type { OrderBookSnapshot } from "@/lib/types";
 import { formatCompact, formatNumber, formatUsd } from "@/lib/utils";
@@ -16,7 +16,7 @@ export function OrderBookPanel({ snapshot }: OrderBookPanelProps) {
   const marker = Math.max(0, Math.min(100, (snapshot.obi + 100) / 2));
 
   return (
-    <Panel title="Order Book L2 · OBI" hint="TOP 20">
+    <Panel title="Order Book L2 · OBI" hint={`${snapshot.source} · TOP 20`}>
       <div className="mb-2.5">
         <div className="mb-1 flex items-center justify-between font-mono text-[8px] uppercase tracking-wider text-zinc-600">
           <span className="text-rose-400">-100 Sell</span>

@@ -9,7 +9,6 @@ import type {
   PipelineStatusResponse,
 } from "@/lib/types";
 import { mockApi } from "@/lib/mockData";
-import { createCardDeck, tickCardDeck } from "@/lib/streamMock";
 import { AssetCard } from "./AssetCard";
 import { AssetDeepDive } from "./AssetDeepDive";
 import { GlobalTelemetry } from "./GlobalTelemetry";
@@ -22,24 +21,44 @@ interface DashboardViewProps {
 }
 
 export function DashboardView({ interval, onIntervalChange, onBack }: DashboardViewProps) {
-  const [cards, setCards] = useState<AssetCardData[]>(() => createCardDeck());
+  const [cards, setCards] = useState<AssetCardData[]>([]);
+  const [overviewSource, setOverviewSource] = useState("—");
+  const [overviewError, setOverviewError] = useState<string | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<DashboardSymbol | null>(null);
   const [pipeline, setPipeline] = useState<PipelineStatusResponse | null>(null);
   const [lagSec, setLagSec] = useState(0.8);
+  const hasLiveCards = cards.some((card) => card.isLive);
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      setCards((previous) => tickCardDeck(previous));
-      setLagSec(0.4 + Math.random() * 0.8);
-    }, 500);
-    return () => window.clearInterval(id);
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const overview = await mockApi.getOverview();
+        if (cancelled) return;
+        setCards(overview.assets);
+        setOverviewSource(overview.source);
+        setOverviewError(overview.isLive ? null : overview.errors[0] ?? "Exchange no disponible");
+      } catch (error) {
+        if (cancelled) return;
+        setOverviewError(error instanceof Error ? error.message : "Exchange no disponible");
+      }
+    };
+    void load();
+    const id = window.setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     const load = () => {
       void mockApi.getPipelineStatus().then((status) => {
-        if (!cancelled) setPipeline(status);
+        if (!cancelled) {
+          setPipeline(status);
+          setLagSec(0.4 + Math.random() * 0.8);
+        }
       });
     };
     load();
@@ -49,10 +68,6 @@ export function DashboardView({ interval, onIntervalChange, onBack }: DashboardV
       window.clearInterval(id);
     };
   }, []);
-
-  const selectAsset = (symbol: DashboardSymbol) => {
-    setSelectedAsset(symbol);
-  };
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-black text-zinc-100">
@@ -64,16 +79,20 @@ export function DashboardView({ interval, onIntervalChange, onBack }: DashboardV
               onClick={onBack}
               className="whitespace-nowrap rounded-full border border-white/10 px-3 py-1.5 font-mono text-[10px] tracking-wide text-zinc-300 transition-colors hover:border-white/25 hover:text-white active:scale-[0.98]"
             >
-              ← ✦ Consola AI
+              ← Consola AI
             </button>
             <span className="font-mono text-[11px] font-medium tracking-[0.16em] text-zinc-200">
               IQ ANALYZER
               <span className="ml-2 font-normal text-zinc-600">/ CRYPTO STREAMING SUITE</span>
             </span>
           </div>
-          <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-zinc-600">
-            {selectedAsset ? "DEEP DIVE" : "MULTI-ASSET OVERVIEW"}
-          </span>
+          <div className="flex items-center gap-2 font-mono text-[9px] uppercase tracking-[0.12em] text-zinc-600">
+            <span className={cards.length === 0 ? "text-amber-400" : hasLiveCards ? "text-emerald-400" : "text-rose-400"}>
+              {cards.length === 0 ? "CARGANDO" : hasLiveCards ? "LIVE" : "SIN DATOS"}
+            </span>
+            <span>{overviewSource}</span>
+            <span>{selectedAsset ? "DEEP DIVE" : "MULTI-ASSET OVERVIEW"}</span>
+          </div>
         </div>
       </header>
 
@@ -104,17 +123,30 @@ export function DashboardView({ interval, onIntervalChange, onBack }: DashboardV
                   Vista general de monedas
                 </h2>
                 <p className="mt-1 font-mono text-[9px] text-zinc-600">
-                  Click en una card para abrir el workspace analítico en vivo.
+                  Precios reales desde {overviewSource}. Click en una card para abrir el workspace.
                 </p>
               </div>
-              <span className="font-mono text-[9px] text-zinc-600">4 ACTIVOS · BINANCE / COINGECKO</span>
+              <span className="font-mono text-[9px] text-zinc-600">
+                {cards.length > 0 ? `${cards.length} ACTIVOS` : "CARGANDO"}
+              </span>
             </div>
 
-            <motion.div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {overviewError && (
+              <div className="mb-4 rounded-xl border border-rose-500/20 bg-rose-500/[0.06] px-3 py-2 font-mono text-[10px] text-rose-300">
+                No se pudo consultar Binance: {overviewError}. No se muestran precios inventados.
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
               {cards.map((asset) => (
-                <AssetCard key={asset.symbol} asset={asset} onSelect={selectAsset} />
+                <AssetCard key={asset.symbol} asset={asset} onSelect={setSelectedAsset} />
               ))}
-            </motion.div>
+              {cards.length === 0 && (
+                <div className="col-span-full rounded-xl border border-white/10 bg-white/[0.02] p-8 text-center font-mono text-[10px] text-zinc-600">
+                  Cargando precios reales de Binance…
+                </div>
+              )}
+            </div>
           </motion.div>
         )}
       </main>

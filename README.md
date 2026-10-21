@@ -340,17 +340,19 @@ La capa de IA vive en `api/` y tiene dos modos:
 make rag-index                 # reconstruye metadata/rag_index.json
 make up-all                    # Ollama + ollama-init (pull del modelo)
 pip install -r api/requirements-llm.txt   # ChromaDB opcional
-make test                      # 48 tests
+make test                      # 59 tests
 ```
 
 ## 11. Dashboard V7 · IQ Analyzer & Crypto Streaming Suite
 
 El frontend es una app **Next.js** (`frontend/`) que se exporta estático y FastAPI la sirve en `http://localhost:8000/` (Docker). También se puede desarrollar con `npm run dev` en `http://localhost:3000`.
 
+**Fuente de mercado:** `data-api.binance.vision` (espejo público de Binance) para precios, klines, order book y trades, con caché de 5 s. Si el exchange no responde, la UI muestra `SIN DATOS` o `SIMULADO`; no presenta precios sintéticos como si fueran live. Arbitraje, liquidaciones y on-chain siguen siendo simulados y están etiquetados como tales. La telemetría global también está marcada `SIM`.
+
 Incluye:
 
 - **View 1:** consola AI con partículas, input flotante, streaming de respuesta, SQL inspector y artefactos.
-- **View 2:** card deck multi-activo (`BTC`, `ETH`, `SOL`, `BNB`) con precio streaming, 24h, sparkline, funding y OBI.
+- **View 2:** card deck multi-activo (`BTC`, `ETH`, `SOL`, `BNB`) con precio, cambio 24h, volumen, sparkline y estado `LIVE`/`SIN DATOS`.
 - **Deep dive** al hacer click en una card: velas OHLCV + volumen, Order Book L2 con gauge OBI, execution tape con filtro de ballenas, matriz de arbitraje cross-exchange, liquidation radar y on-chain/macro (netflow, OI, long/short, MVRV).
 - Telemetría global: latencia WS, throughput, funding countdown, gas y Fear & Greed.
 - Chat con `/api/chat` / SSE, fuentes, fecha de corte y disclaimer.

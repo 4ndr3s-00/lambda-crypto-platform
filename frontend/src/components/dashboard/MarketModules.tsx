@@ -6,7 +6,7 @@ import { Panel } from "./Panel";
 
 export function ArbitrageMatrix({ quotes }: { quotes: ArbitrageQuote[] }) {
   return (
-    <Panel title="Cross-Exchange Arbitrage" hint="TAKER FEE 0.06%">
+    <Panel title="Cross-Exchange Arbitrage" hint="SIMULADO · TAKER FEE 0.06%">
       <div className="grid grid-cols-[1fr_1fr_0.8fr_0.8fr] gap-1 border-b border-white/[0.06] pb-1 font-mono text-[8px] uppercase tracking-wider text-zinc-600">
         <span>Exchange</span>
         <span className="text-right">Price</span>
@@ -40,7 +40,7 @@ export function ArbitrageMatrix({ quotes }: { quotes: ArbitrageQuote[] }) {
 
 export function LiquidationRadar({ events }: { events: LiquidationEvent[] }) {
   return (
-    <Panel title="Liquidation Radar" hint="FORCED LIQUIDATIONS">
+    <Panel title="Liquidation Radar" hint="SIMULADO · FORCED LIQUIDATIONS">
       <div className="grid grid-cols-[1fr_0.7fr_0.8fr_0.7fr] gap-1 border-b border-white/[0.06] pb-1 font-mono text-[8px] uppercase tracking-wider text-zinc-600">
         <span>Hora</span>
         <span className="text-right">USD</span>
@@ -69,7 +69,7 @@ export function LiquidationRadar({ events }: { events: LiquidationEvent[] }) {
 export function OnChainMacro({ snapshot }: { snapshot: OnChainSnapshot }) {
   const maxAbs = Math.max(...snapshot.netflow.map((point) => Math.abs(point.value)), 1);
   return (
-    <Panel title="On-Chain & Macro · Batch Layer" hint="MINIO / SPARK">
+    <Panel title="On-Chain & Macro · Batch Layer" hint="SIMULADO · MINIO / SPARK">
       <div className="grid gap-4 md:grid-cols-[1.5fr_1fr]">
         <div>
           <div className="mb-1 flex items-center justify-between font-mono text-[8px] uppercase tracking-wider text-zinc-600">

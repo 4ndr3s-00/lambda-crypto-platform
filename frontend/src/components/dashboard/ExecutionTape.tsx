@@ -7,6 +7,7 @@ import { Panel } from "./Panel";
 
 interface ExecutionTapeProps {
   trades: ExecutionTrade[];
+  source: string;
 }
 
 function tradeClock(iso: string): string {
@@ -15,7 +16,7 @@ function tradeClock(iso: string): string {
   return `${base}.${String(date.getUTCMilliseconds()).padStart(3, "0")}`;
 }
 
-export function ExecutionTape({ trades }: ExecutionTapeProps) {
+export function ExecutionTape({ trades, source }: ExecutionTapeProps) {
   const [filter, setFilter] = useState<"all" | "whales">("all");
 
   const visible = useMemo(() => {
@@ -24,7 +25,7 @@ export function ExecutionTape({ trades }: ExecutionTapeProps) {
   }, [trades, filter]);
 
   return (
-    <Panel title="Execution Tape" hint={`${visible.length} ROWS · VIRTUALIZED`}>
+    <Panel title="Execution Tape" hint={`${visible.length} ROWS · ${source}`}>
       <div className="mb-2 flex items-center gap-1">
         <button
           type="button"
@@ -48,7 +49,7 @@ export function ExecutionTape({ trades }: ExecutionTapeProps) {
               : "border-white/10 text-zinc-500 hover:text-zinc-200",
           )}
         >
-          🐋 Solo ballenas &gt; $100k
+          Solo ballenas &gt; $100k
         </button>
       </div>
 
@@ -68,14 +69,16 @@ export function ExecutionTape({ trades }: ExecutionTapeProps) {
             <span className={cn("text-right", trade.side === "buy" ? "text-emerald-400" : "text-rose-400")}>
               {formatNumber(trade.price, 2)}
             </span>
-            <span className="text-right text-zinc-400">{formatCompact(trade.size)}</span>
+            <span className="text-right text-zinc-400">{formatNumber(trade.size, trade.size < 1 ? 6 : 2)}</span>
             <span className={cn("text-right", trade.whale ? "font-medium text-zinc-100" : "text-zinc-400")}>
-              {trade.whale ? "🐋 " : ""}${formatCompact(trade.notional)}
+              ${formatCompact(trade.notional)}
             </span>
           </div>
         ))}
         {visible.length === 0 && (
-          <div className="py-8 text-center font-mono text-[10px] text-zinc-600">Sin ballenas en esta ventana.</div>
+          <div className="py-8 text-center font-mono text-[10px] text-zinc-600">
+            Sin trades reales en esta ventana.
+          </div>
         )}
       </div>
     </Panel>

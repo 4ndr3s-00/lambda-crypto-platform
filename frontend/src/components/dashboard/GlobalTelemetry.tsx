@@ -49,6 +49,9 @@ export function GlobalTelemetry() {
         <span className="text-zinc-300">{data.gasGwei} Gwei</span>
       </span>
       <span className="inline-flex items-center gap-1.5">
+        <span className="text-zinc-700">SIM</span>
+      </span>
+      <span className="inline-flex items-center gap-1.5">
         <span className="text-zinc-700">F&amp;G</span>
         <span className={data.fearGreed >= 60 ? "text-emerald-400" : data.fearGreed >= 40 ? "text-amber-400" : "text-rose-400"}>
           {data.fearGreed} · {data.fearGreedLabel}
