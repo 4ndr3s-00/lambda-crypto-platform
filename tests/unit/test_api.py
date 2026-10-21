@@ -50,7 +50,8 @@ def test_market_endpoints_and_frontend(monkeypatch) -> None:
         assert len(payload["candles"]) == 12
         assert payload["candles"][-1]["close"] > 0
         assert payload["is_live"] is True
-        assert payload["source"] == "Binance Public REST"
+        assert payload["source"] in {"Binance Public REST", "serving.ohlcv_reconciled (Postgres)"}
+        assert payload["data_source"] in {"exchange_live", "postgres_reconciled"}
 
         metrics = client.get("/api/market/metrics", params={"symbol": "ETHUSDT", "window": "24h"})
         assert metrics.status_code == 200
