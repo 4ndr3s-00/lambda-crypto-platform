@@ -230,13 +230,16 @@ class QueryService:
             params.append(end_time)
 
         query = f"""
-            SELECT symbol, timeframe, bucket_start, bucket_end,
-                   open_price, high_price, low_price, close_price,
-                   volume, trades_count, source_layer, is_consolidated, updated_at
-            FROM serving.ohlcv_reconciled
-            WHERE {' AND '.join(where_clauses)}
-            ORDER BY bucket_start ASC
-            LIMIT %s;
+            SELECT * FROM (
+                SELECT symbol, timeframe, bucket_start, bucket_end,
+                       open_price, high_price, low_price, close_price,
+                       volume, trades_count, source_layer, is_consolidated, updated_at
+                FROM serving.ohlcv_reconciled
+                WHERE {' AND '.join(where_clauses)}
+                ORDER BY bucket_start DESC
+                LIMIT %s
+            ) latest
+            ORDER BY bucket_start ASC;
         """
 
         try:
@@ -284,7 +287,8 @@ class QueryService:
                 "event_timestamp": now,
                 "ingestion_timestamp": now,
                 "last_updated_utc": now,
-                "source": "Speed Layer (Spark Structured Streaming)",
+                "source": "SIMULATED_FALLBACK",
+                "data_source": "synthetic_fallback",
             }
         ]
 
@@ -319,13 +323,15 @@ class QueryService:
                         item["source"] = "Speed Layer (Spark Structured Streaming)"
                         items.append(item)
 
-                    if not items:
+                    is_real = bool(items)
+                    if not is_real:
                         items = self._fallback_metrics(symbol)
 
                     return {
                         "count": len(items),
                         "last_updated_utc": datetime.now(timezone.utc),
                         "items": items,
+                        "data_source": "postgres_reconciled" if is_real else "synthetic_fallback",
                     }
         except Exception as e:
             logger.warning("Error consultando métricas en Postgres: %s", e)
@@ -334,7 +340,9 @@ class QueryService:
                 "count": len(items),
                 "last_updated_utc": datetime.now(timezone.utc),
                 "items": items,
+                "data_source": "synthetic_fallback",
             }
+
     def get_pipeline_status(self) -> Dict[str, Any]:
         """
         Retorna el estado de salud y observabilidad de los componentes del pipeline,
@@ -367,6 +375,7 @@ class QueryService:
         except Exception as e:
             logger.warning(f"Error consultando pipeline_status: {e}")
 
+        has_persisted_components = bool(components)
         if not components:
             now = datetime.now(timezone.utc)
             components = [
@@ -389,7 +398,8 @@ class QueryService:
             "cluster_status": cluster_status,
             "timestamp_utc": datetime.now(timezone.utc),
             "freshness_seconds": freshness_sec if freshness_sec is not None else 2.5,
-            "components": components
+            "components": components,
+            "data_source": "postgres_reconciled" if has_persisted_components else "synthetic_fallback",
         }
 
     # ------------------------------------------------------------------
@@ -450,6 +460,7 @@ class QueryService:
                         "candles": candles,
                         "source": "serving.ohlcv_reconciled (Postgres)",
                         "provenance": "SPEED_LAYER",
+                        "data_source": "postgres_reconciled",
                         "watermark": "event-time ? 2s",
                         "cutoff_time": candles[-1]["timestamp"],
                         "is_live": True,
@@ -464,6 +475,7 @@ class QueryService:
             return {
                 **live,
                 "provenance": "SPEED_LAYER",
+                "data_source": "exchange_live",
                 "watermark": "Binance REST ? cache 5s",
                 "cutoff_time": live["candles"][-1]["timestamp"],
             }
@@ -481,6 +493,7 @@ class QueryService:
             "candles": candles,
             "source": "SIMULATED_FALLBACK",
             "provenance": "SPEED_LAYER",
+            "data_source": "synthetic_fallback",
             "watermark": "SIMULATED FALLBACK",
             "cutoff_time": candles[-1]["timestamp"],
             "is_live": False,
@@ -496,6 +509,7 @@ class QueryService:
         source: str,
         is_live: bool,
         fetched_at: str,
+        data_source: str,
     ) -> Dict[str, Any]:
         if len(candles) < 2:
             raise ValueError("no hay suficientes velas para calcular m?tricas")
@@ -526,6 +540,7 @@ class QueryService:
             "low": round(min(float(candle["low"]) for candle in candles), 8),
             "source": source,
             "provenance": "SPEED_LAYER",
+            "data_source": data_source,
             "cutoff_time": candles[-1]["timestamp"],
             "freshness_seconds": 0.8,
             "is_live": is_live,
@@ -558,9 +573,49 @@ class QueryService:
                     "serving.ohlcv_reconciled (Postgres)",
                     True,
                     _iso(datetime.now(timezone.utc)),
+                    "postgres_reconciled",
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("get_market_metrics Postgres fallback: %s", exc)
+
+        # 1b) Speed Layer snapshot when reconciled candles are not available yet.
+        # The streaming sink writes this table directly, so it is real pipeline
+        # data even if the batch reconciliation DAG has not run.
+        if self._postgres_available():
+            try:
+                realtime = self.get_metrics(clean_symbol)
+                if realtime.get("data_source") == "postgres_reconciled":
+                    items = realtime.get("items", [])
+                    if items:
+                        snapshot = items[0]
+                        last_price = float(snapshot.get("last_price") or 0.0)
+                        pct_change_5m = float(snapshot.get("pct_change_5m") or 0.0)
+                        rolling_volume_5m = float(snapshot.get("rolling_volume_5m") or 0.0)
+                        if last_price > 0:
+                            denominator = 1 + pct_change_5m / 100.0
+                            open_price = last_price / denominator if denominator else last_price
+                            return {
+                                "symbol": clean_symbol,
+                                "window": window,
+                                "current_price": round(last_price, 8),
+                                "return_24h": round(pct_change_5m, 4),
+                                "volume_24h": round(rolling_volume_5m, 2),
+                                "volume_base": round(rolling_volume_5m, 8),
+                                "vwap": round(last_price, 8),
+                                "price_variance": 0.0,
+                                "open": round(open_price, 8),
+                                "high": round(last_price, 8),
+                                "low": round(last_price, 8),
+                                "source": "serving.realtime_metrics (Postgres)",
+                                "provenance": "SPEED_LAYER",
+                                "data_source": "postgres_reconciled",
+                                "cutoff_time": _iso(snapshot.get("event_timestamp")),
+                                "freshness_seconds": 0.8,
+                                "is_live": True,
+                                "fetched_at": _iso(datetime.now(timezone.utc)),
+                            }
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("get_market_metrics realtime_metrics fallback: %s", exc)
 
         # 2) Real Binance data.
         try:
@@ -572,6 +627,7 @@ class QueryService:
                 "Binance Public REST",
                 True,
                 live["fetched_at"],
+                "exchange_live",
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("get_market_metrics Binance fallback: %s", exc)
@@ -582,6 +638,7 @@ class QueryService:
         payload.update(
             {
                 "source": "SIMULATED_FALLBACK",
+                "data_source": "synthetic_fallback",
                 "is_live": False,
                 "fetched_at": _iso(datetime.now(timezone.utc)),
                 "error": exchange_error,
@@ -630,11 +687,13 @@ class QueryService:
 
     def get_market_pipeline_status(self) -> Dict[str, Any]:
         base = market_data.pipeline_status()
+        base["data_source"] = "synthetic_fallback"
         if not self._postgres_available():
             return base
         try:
             payload = self.get_pipeline_status()
             components = payload.get("components", []) if isinstance(payload, dict) else []
+            base["data_source"] = payload.get("data_source", "synthetic_fallback")
             for component in components:
                 name = str(component.get("component", "")).lower()
                 status = str(component.get("status", "SUCCESS")).upper()
