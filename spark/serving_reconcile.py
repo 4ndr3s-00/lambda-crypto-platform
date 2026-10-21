@@ -41,6 +41,7 @@ La unicidad de la clave `(symbol, interval, bucket_start)` garantiza que el
 resultado consolidado tenga exactamente una fila por vela.
 """
 
+import argparse
 import os
 import sys
 
@@ -49,6 +50,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
+
+from spark_session import batch_results_path, build_spark_session
 
 # Columna que identifica de forma única una vela dentro del dataset
 # consolidado. La reconciliación se apoya en ella para descartar las filas
@@ -234,3 +237,218 @@ def reconciliation_stats(
         "unified_rows": unified.count(),
         "overlapping_keys": len(overlapping),
     }
+
+
+# ==============================================================================
+# Persistencia en Postgres y CLI (ejecución programada, p.ej. desde Airflow)
+# ==============================================================================
+# Hasta aquí este módulo era una librería pura de DataFrames (solo tests). Lo
+# que sigue cierra el circuito real: lee la ruta Batch desde MinIO, la ruta
+# Speed desde `serving.realtime_metrics` (lo único que el Speed Layer deja en
+# Postgres hoy: el último valor conocido por símbolo) y escribe el resultado
+# reconciliado en `serving.ohlcv_reconciled`, que es la tabla que de verdad
+# consulta `api/query_service.py`.
+
+JDBC_URL_TEMPLATE = "jdbc:postgresql://{host}:{port}/{dbname}"
+
+
+def _jdbc_options(pg_conn_params: dict) -> dict:
+    return {
+        "url": JDBC_URL_TEMPLATE.format(
+            host=pg_conn_params["host"],
+            port=pg_conn_params["port"],
+            dbname=pg_conn_params["dbname"],
+        ),
+        "user": pg_conn_params["user"],
+        "password": pg_conn_params["password"],
+        "driver": "org.postgresql.Driver",
+    }
+
+
+def read_batch_ohlcv(spark, interval: str, symbols: list = None) -> DataFrame:
+    """
+    Lee las velas consolidadas por la capa Batch (US-11) para un `interval` dado.
+
+    `batch_historical.py` escribe todas las granularidades juntas bajo
+    `batch-results/metric=ohlcv` (particionado solo por `date`), con `interval`
+    como columna de datos, no de partición — por eso se filtra en memoria.
+    """
+    path = batch_results_path("ohlcv")
+    df = (
+        spark.read.parquet(path)
+        .filter(F.col("interval") == interval)
+        .withColumn("event_time", F.col("bucket_start"))
+        .withColumn("trades_count", F.coalesce(F.col("trades_count"), F.lit(0)))
+    )
+    if symbols:
+        df = df.filter(F.col("symbol").isin(symbols))
+    return df
+
+
+def read_speed_snapshot(spark, pg_conn_params: dict, interval: str, symbols: list = None) -> DataFrame:
+    """
+    Proyecta `serving.realtime_metrics` (último valor conocido por símbolo) como
+    una "vela en formación" del intervalo solicitado, para poder reconciliarla
+    contra la ruta Batch con el mismo esquema `(symbol, interval, bucket_start, ...)`.
+
+    Es una aproximación honesta de lo que hay disponible hoy: el Speed Layer
+    (`streaming_market.py`) solo persiste el último snapshot por símbolo, no un
+    historial de velas; por eso la fila Speed siempre representa "ahora mismo".
+    """
+    query = (
+        "(SELECT symbol, last_price, rolling_volume_5m, event_timestamp "
+        "FROM serving.realtime_metrics) AS speed_snapshot"
+    )
+    raw = spark.read.format("jdbc").options(**_jdbc_options(pg_conn_params), dbtable=query).load()
+    if symbols:
+        raw = raw.filter(F.col("symbol").isin(symbols))
+
+    seconds = {"1m": 60, "5m": 300, "1h": 3600, "1d": 86400}.get(interval, 300)
+    bucket_start = F.from_unixtime(
+        (F.unix_timestamp("event_timestamp") / seconds).cast("long") * seconds
+    ).cast("timestamp")
+
+    return (
+        raw.withColumn("bucket_start", bucket_start)
+        .withColumn("bucket_end", F.col("event_timestamp"))
+        .withColumn("interval", F.lit(interval))
+        .withColumn("open", F.col("last_price"))
+        .withColumn("high", F.col("last_price"))
+        .withColumn("low", F.col("last_price"))
+        .withColumn("close", F.col("last_price"))
+        .withColumn("volume", F.coalesce(F.col("rolling_volume_5m"), F.lit(0.0)))
+        .withColumn("trades_count", F.lit(0))
+        .withColumn("event_time", F.col("event_timestamp"))
+        .select(
+            "symbol", "interval", "bucket_start", "bucket_end",
+            "open", "high", "low", "close", "volume", "trades_count", "event_time",
+        )
+    )
+
+
+def write_ohlcv_reconciled(unified_df: DataFrame, pg_conn_params: dict) -> int:
+    """
+    Hace upsert del resultado reconciliado en `serving.ohlcv_reconciled`.
+
+    Se materializa un batch pequeño (una fila por vela por símbolo) con
+    `collect()` y se escribe con `INSERT ... ON CONFLICT` vía psycopg2: Spark
+    JDBC no soporta upsert nativo y el volumen por ejecución es mínimo
+    (símbolos activos x intervalos), así que no se justifica un MERGE distribuido.
+    """
+    rows = unified_df.select(
+        "symbol", "interval", "bucket_start", "bucket_end",
+        "open", "high", "low", "close", "volume", "trades_count",
+        "source", "is_provisional",
+    ).collect()
+
+    if not rows:
+        return 0
+
+    import psycopg2
+    from psycopg2.extras import execute_values
+
+    query = """
+        INSERT INTO serving.ohlcv_reconciled (
+            symbol, timeframe, bucket_start, bucket_end,
+            open_price, high_price, low_price, close_price,
+            volume, trades_count, source_layer, is_consolidated, updated_at
+        ) VALUES %s
+        ON CONFLICT (symbol, timeframe, bucket_start) DO UPDATE SET
+            bucket_end = EXCLUDED.bucket_end,
+            open_price = EXCLUDED.open_price,
+            high_price = EXCLUDED.high_price,
+            low_price = EXCLUDED.low_price,
+            close_price = EXCLUDED.close_price,
+            volume = EXCLUDED.volume,
+            trades_count = EXCLUDED.trades_count,
+            source_layer = EXCLUDED.source_layer,
+            is_consolidated = EXCLUDED.is_consolidated,
+            updated_at = CURRENT_TIMESTAMP
+        -- Nunca dejar que una fila provisional (Speed) pise una ya consolidada
+        -- (Batch) para la misma vela: eso rompería la precedencia de US-21.
+        WHERE serving.ohlcv_reconciled.is_consolidated = FALSE
+           OR EXCLUDED.is_consolidated = TRUE;
+    """
+    values = [
+        (
+            r["symbol"], r["interval"], r["bucket_start"], r["bucket_end"],
+            r["open"], r["high"], r["low"], r["close"],
+            r["volume"], r["trades_count"],
+            r["source"], (not r["is_provisional"]),
+        )
+        for r in rows
+    ]
+
+    conn = psycopg2.connect(connect_timeout=5, **pg_conn_params)
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                execute_values(cur, query, values)
+    finally:
+        conn.close()
+
+    return len(values)
+
+
+def parse_args(argv=None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="serving_reconcile.py",
+        description=(
+            "Reconcilia la ruta Batch (MinIO) y la ruta Speed (serving.realtime_metrics) "
+            "y escribe el resultado en serving.ohlcv_reconciled (US-21)."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("--intervals", type=str, default="1m,5m,1h,1d")
+    parser.add_argument("--symbols", type=str, default=None, help="Lista separada por comas, ej. BTCUSDT,ETHUSDT")
+    parser.add_argument("--postgres-host", type=str, default=os.environ.get("POSTGRES_HOST", "postgres"))
+    parser.add_argument("--postgres-port", type=str, default=os.environ.get("POSTGRES_PORT", "5432"))
+    parser.add_argument(
+        "--postgres-db", type=str,
+        default=os.environ.get("SERVING_DB_NAME", os.environ.get("POSTGRES_DB", "serving_db")),
+    )
+    parser.add_argument(
+        "--postgres-user", type=str,
+        default=os.environ.get("SERVING_DB_USER", os.environ.get("POSTGRES_USER", "postgres")),
+    )
+    parser.add_argument(
+        "--postgres-password", type=str,
+        default=os.environ.get("SERVING_DB_PASSWORD", os.environ.get("POSTGRES_PASSWORD", "postgres_secure_pass")),
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None) -> int:
+    args = parse_args(argv)
+    intervals = [i.strip() for i in args.intervals.split(",") if i.strip()]
+    symbols = [s.strip().upper() for s in args.symbols.split(",")] if args.symbols else None
+    pg_conn_params = {
+        "host": args.postgres_host,
+        "port": args.postgres_port,
+        "dbname": args.postgres_db,
+        "user": args.postgres_user,
+        "password": args.postgres_password,
+    }
+
+    spark = build_spark_session(app_name="serving-reconcile", enable_postgres=True)
+
+    total_written = 0
+    for interval in intervals:
+        try:
+            batch_df = read_batch_ohlcv(spark, interval, symbols)
+        except Exception as exc:  # noqa: BLE001
+            print(f"⚠️  Sin datos Batch para interval={interval}: {exc}")
+            continue
+
+        speed_df = read_speed_snapshot(spark, pg_conn_params, interval, symbols)
+        unified = reconcile_deduplicated(batch_df, speed_df)
+        written = write_ohlcv_reconciled(unified, pg_conn_params)
+        total_written += written
+        print(f"✅ interval={interval}: {written} velas upsert en serving.ohlcv_reconciled")
+
+    print(f"🏁 Reconciliación completa: {total_written} velas escritas en total.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
