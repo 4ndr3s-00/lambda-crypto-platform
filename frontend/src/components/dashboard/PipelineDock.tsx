@@ -58,7 +58,7 @@ export function PipelineDock({ status, lagSec }: PipelineDockProps) {
         >
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-zinc-400">
             <span>Pipeline Health</span>
-            <span className="text-emerald-400">● OPERATIVO</span>
+            <span className="text-amber-400">● SIMULADO</span>
           </div>
           <div className="flex shrink-0 items-center gap-3 font-mono text-[10px] text-zinc-600">
             <span>Frescura {lagSec.toFixed(1)}s</span>
