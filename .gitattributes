@@ -1,0 +1,14 @@
+# Los scripts que corren dentro de contenedores Linux deben quedar en LF.
+# Sin esto, un checkout en Windows con core.autocrlf=true rompe /bin/sh
+# con errores tipo "set: pipefail: invalid option name" o "$'\r'".
+*.sh text eol=lf
+*.py text eol=lf
+Dockerfile text eol=lf
+Makefile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
+# Scripts nativos de Windows, si se agregan en el futuro.
+*.ps1 text eol=crlf

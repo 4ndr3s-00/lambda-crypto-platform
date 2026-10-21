@@ -1,20 +1,28 @@
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Dependencias del sistema mínimas
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libpq-dev \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# El paquete api/ se copia como /app/api para que los imports relativos
-# funcionen con uvicorn api.main:app.
-COPY requirements.txt /app/api/requirements.txt
+COPY api/requirements.txt /app/api/requirements.txt
 RUN pip install --no-cache-dir -r /app/api/requirements.txt
 
-COPY . /app/api
+COPY api /app/api
+COPY --from=frontend-builder /frontend/out /app/static
 
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1

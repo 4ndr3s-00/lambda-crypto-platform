@@ -40,6 +40,14 @@ SYMBOLS: dict[str, dict[str, Any]] = {
         "volatility_15m": 0.0078,
         "volatility_1h": 0.0171,
         "base_volume": 41200.0,
+    },    "BNBUSDT": {
+        "base": "BNB",
+        "quote": "USDT",
+        "source": "Binance Public WebSocket",
+        "base_price": 612.40,
+        "volatility_15m": 0.0052,
+        "volatility_1h": 0.0113,
+        "base_volume": 9800.0,
     },
 }
 

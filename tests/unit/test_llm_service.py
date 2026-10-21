@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 
@@ -40,7 +40,7 @@ def test_pipeline_fallback_has_audit_metadata() -> None:
 
 
 def test_metrics_fallback_uses_tool_and_sql() -> None:
-    response = ask(make_service(), "Â¿CuÃ¡l es el retorno y volumen de ETH en 24h?", symbol="ETHUSDT")
+    response = ask(make_service(), "¿Cuál es el retorno y volumen de ETH en 24h?", symbol="ETHUSDT")
     assert response.asset == "ETHUSDT"
     assert "Retorno" in response.answer
     assert response.sql and "serving.realtime_metrics" in response.sql
@@ -58,8 +58,8 @@ def test_catalog_fallback_returns_owner_and_lineage() -> None:
 
 
 def test_price_fallback_returns_timeseries_and_cutoff() -> None:
-    response = ask(make_service(), "Â¿CuÃ¡l fue el precio mÃ¡ximo de BTC hoy?", symbol="BTCUSDT")
-    assert "MÃ¡ximo" in response.answer
+    response = ask(make_service(), "¿Cuál fue el precio máximo de BTC hoy?", symbol="BTCUSDT")
+    assert "Máximo" in response.answer
     assert response.cutoff_time
     assert response.sql and "serving.ohlcv_reconciled" in response.sql
     assert response.sources
@@ -86,13 +86,13 @@ def test_ollama_tool_call_loop_executes_read_only_tool() -> None:
             }
         return {
             "message": {
-                "content": '{"answer":"BTCUSDT actualizado con mÃ©tricas de 24h.","sql":null,"provenance":"SPEED_LAYER"}'
+                "content": '{"answer":"BTCUSDT actualizado con métricas de 24h.","sql":null,"provenance":"SPEED_LAYER"}'
             }
         }
 
     service._post_ollama = fake_post  # type: ignore[method-assign]
     service.__dict__.pop("_run_ollama", None)
-    response = ask(service, "Â¿CÃ³mo viene BTC en 24h?")
+    response = ask(service, "¿Cómo viene BTC en 24h?")
     assert calls["count"] == 2
     assert response.answer.startswith("BTCUSDT actualizado")
     assert response.tool_calls and response.tool_calls[0].name == "query_metrics"

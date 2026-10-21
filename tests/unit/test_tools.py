@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from api.query_service import QueryService
 from api.tools import TOOL_SPECS, ToolRegistry
@@ -53,4 +53,4 @@ def test_rejects_unknown_tool() -> None:
 def test_rejects_invalid_arguments() -> None:
     result = registry().execute("query_timeseries", {"symbol": "BTCUSDT", "interval": "15m", "limit": 500})
     assert result.ok is False
-    assert "invÃ¡lidos" in (result.error or "")
+    assert "inválidos" in (result.error or "")

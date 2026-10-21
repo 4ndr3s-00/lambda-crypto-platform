@@ -1,4 +1,4 @@
-﻿"""Typed, read-only tools exposed to Qwen2.5 (US-29).
+"""Typed, read-only tools exposed to Qwen2.5 (US-29).
 
 Only three capabilities exist:
     - get_catalog_metadata
@@ -45,8 +45,8 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "function": {
             "name": "get_catalog_metadata",
             "description": (
-                "Devuelve owner, schema version, retenciÃ³n, particiones y linaje de un dataset "
-                "del catÃ¡logo de gobierno. Usar para preguntas de catÃ¡logo/linaje, no para precios."
+                "Devuelve owner, schema version, retención, particiones y linaje de un dataset "
+                "del catálogo de gobierno. Usar para preguntas de catálogo/linaje, no para precios."
             ),
             "parameters": {
                 "type": "object",
@@ -54,7 +54,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
                     "dataset": {
                         "type": "string",
                         "enum": ["market_ohlcv", "market_metrics"],
-                        "description": "Dataset del catÃ¡logo.",
+                        "description": "Dataset del catálogo.",
                     }
                 },
                 "required": ["dataset"],
@@ -67,13 +67,13 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "function": {
             "name": "query_metrics",
             "description": (
-                "Calcula mÃ©tricas agregadas de mercado (precio actual, retorno, volumen, VWAP, "
-                "varianza) para un sÃ­mbolo y ventana. Solo lectura."
+                "Calcula métricas agregadas de mercado (precio actual, retorno, volumen, VWAP, "
+                "varianza) para un símbolo y ventana. Solo lectura."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "symbol": {"type": "string", "enum": ["BTCUSDT", "ETHUSDT", "SOLUSDT"]},
+                    "symbol": {"type": "string", "enum": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]},
                     "window": {"type": "string", "enum": list(WINDOWS)},
                 },
                 "required": ["symbol", "window"],
@@ -86,13 +86,13 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "function": {
             "name": "query_timeseries",
             "description": (
-                "Devuelve velas OHLCV recientes para un sÃ­mbolo, intervalo y lÃ­mite <= 100. "
-                "Usar para precios, mÃ¡ximos/mÃ­nimos, velas y series temporales."
+                "Devuelve velas OHLCV recientes para un símbolo, intervalo y límite <= 100. "
+                "Usar para precios, máximos/mínimos, velas y series temporales."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "symbol": {"type": "string", "enum": ["BTCUSDT", "ETHUSDT", "SOLUSDT"]},
+                    "symbol": {"type": "string", "enum": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]},
                     "interval": {"type": "string", "enum": list(INTERVALS)},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 100},
                 },
@@ -150,7 +150,7 @@ class ToolRegistry:
                 name=name,
                 arguments=args,
                 ok=False,
-                error=f"argumentos invÃ¡lidos: {exc.errors()}",
+                error=f"argumentos inválidos: {exc.errors()}",
             )
         except (QueryServiceError, ValueError) as exc:
             return ToolResult(name=name, arguments=args, ok=False, error=str(exc))
@@ -162,7 +162,7 @@ class ToolRegistry:
             arguments=args.model_dump(),
             payload=payload,
             summary=(
-                f"{payload.get('dataset', args.dataset)} Â· owner={payload.get('owner', 'n/d')} Â· "
+                f"{payload.get('dataset', args.dataset)} · owner={payload.get('owner', 'n/d')} · "
                 f"schema={payload.get('schema_version', 'n/d')}"
             ),
             source=str(payload.get("source", "governance.dataset_catalog")),
@@ -185,8 +185,8 @@ class ToolRegistry:
             arguments=args.model_dump(),
             payload=payload,
             summary=(
-                f"{payload['symbol']} Â· precio={_money(payload['current_price'])} Â· "
-                f"retorno={payload['return_24h']:+.2f}% Â· VWAP={_money(payload['vwap'])}"
+                f"{payload['symbol']} · precio={_money(payload['current_price'])} · "
+                f"retorno={payload['return_24h']:+.2f}% · VWAP={_money(payload['vwap'])}"
             ),
             source=str(payload.get("source", "serving.realtime_metrics")),
             cutoff_time=str(payload.get("cutoff_time", "")),
@@ -209,8 +209,8 @@ class ToolRegistry:
             arguments=args.model_dump(),
             payload=payload,
             summary=(
-                f"{payload['symbol']} Â· {payload['interval']} Â· {len(candles)} velas Â· "
-                f"Ãºltimo close={last.get('close', 'n/d')}"
+                f"{payload['symbol']} · {payload['interval']} · {len(candles)} velas · "
+                f"último close={last.get('close', 'n/d')}"
             ),
             source=str(payload.get("source", "serving.ohlcv_reconciled")),
             cutoff_time=str(payload.get("cutoff_time", "")),

@@ -1,10 +1,10 @@
-"""
+﻿"""
 FastAPI Serving Layer API para la Plataforma Lambda.
 
 Integra:
 - US-22: Serving REST API (health, assets, OHLCV, metrics, pipeline, guardrails).
 - US-28/29/30: Qwen2.5 local, RAG, tools de solo lectura y chat SSE.
-- US-23/24: endpoints de mercado y telemetría para el dashboard.
+- US-23/24: endpoints de mercado y telemetrÃ­a para el dashboard.
 
 Los endpoints originales de US-22 conservan sus contratos; el dashboard y el
 chat consumen los adaptadores `/api/market/*` y `/api/chat*`.
@@ -79,7 +79,7 @@ app = FastAPI(
     version="6.0.0",
     description="""
 API REST de la Serving Layer para la Plataforma de Datos Financieros y Criptomonedas.
-Incluye mercado OHLCV, métricas, telemetría, dashboard, Qwen2.5 local, RAG y guardrails SQL.
+Incluye mercado OHLCV, mÃ©tricas, telemetrÃ­a, dashboard, Qwen2.5 local, RAG y guardrails SQL.
     """,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -113,7 +113,7 @@ app.state.llm_service = llm_service
 
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
-    logger.warning("Validación fallida en %s: %s", request.url.path, exc)
+    logger.warning("ValidaciÃ³n fallida en %s: %s", request.url.path, exc)
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
         content={
@@ -126,7 +126,7 @@ async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    logger.warning("Parámetro inválido en %s: %s", request.url.path, exc.errors())
+    logger.warning("ParÃ¡metro invÃ¡lido en %s: %s", request.url.path, exc.errors())
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
@@ -144,7 +144,7 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": "Internal Server Error",
-            "detail": "Ocurrió un error interno en el servicio de consulta.",
+            "detail": "OcurriÃ³ un error interno en el servicio de consulta.",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )
@@ -155,7 +155,7 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
 # ---------------------------------------------------------------------------
 
 
-@app.get("/api/health", response_model=HealthResponse, tags=["Salud y Diagnóstico"])
+@app.get("/api/health", response_model=HealthResponse, tags=["Salud y DiagnÃ³stico"])
 def get_health() -> dict[str, Any]:
     dependencies = query_service.check_dependencies()
     overall_status = "healthy"
@@ -170,7 +170,7 @@ def get_health() -> dict[str, Any]:
     }
 
 
-@app.get("/api/assets", response_model=AssetsResponse, tags=["Catálogo de Mercado"])
+@app.get("/api/assets", response_model=AssetsResponse, tags=["CatÃ¡logo de Mercado"])
 def get_assets(
     exchange: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
@@ -199,7 +199,7 @@ def get_ohlcv(
     )
 
 
-@app.get("/api/metrics", response_model=MetricsResponse, tags=["Métricas en Tiempo Real"])
+@app.get("/api/metrics", response_model=MetricsResponse, tags=["MÃ©tricas en Tiempo Real"])
 def get_metrics(symbol: Optional[str] = Query(None)) -> dict[str, Any]:
     clean_symbol = sanitize_symbol(symbol) if symbol else None
     return query_service.get_metrics(symbol=clean_symbol)
@@ -268,7 +268,7 @@ def get_market_pipeline() -> MarketPipelineStatusResponse:
 
 
 # ---------------------------------------------------------------------------
-# US-28 / US-29 / US-30: catálogo, RAG y chat
+# US-28 / US-29 / US-30: catÃ¡logo, RAG y chat
 # ---------------------------------------------------------------------------
 
 
@@ -345,7 +345,7 @@ async def chat_stream(
 
 
 # ---------------------------------------------------------------------------
-# Frontend estático
+# Frontend estÃ¡tico
 # ---------------------------------------------------------------------------
 
 def _frontend_dir() -> Optional[str]:
@@ -353,6 +353,7 @@ def _frontend_dir() -> Optional[str]:
         os.getenv("FRONTEND_DIR"),
         os.getenv("STATIC_DIR"),
         os.path.join(os.path.dirname(__file__), "..", "frontend"),
+        os.path.join(os.path.dirname(__file__), "..", "frontend", "out"),
         os.path.join(os.path.dirname(__file__), "..", "static"),
         "/app/static",
     ]
@@ -365,7 +366,7 @@ def _frontend_dir() -> Optional[str]:
 _frontend = _frontend_dir()
 if _frontend:
     app.mount("/static", StaticFiles(directory=_frontend), name="static")
-    # Sirve index.html, styles.css y app.js en la raíz.
+    # Sirve index.html, styles.css y app.js en la raÃ­z.
     app.mount("/", StaticFiles(directory=_frontend, html=True), name="frontend")
 else:
-    logger.warning("No se encontró frontend/index.html; el dashboard no se servirá")
+    logger.warning("No se encontrÃ³ frontend/index.html; el dashboard no se servirÃ¡")
