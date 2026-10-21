@@ -414,6 +414,9 @@ class QueryService:
         fallback_interval = interval
 
         if not self._postgres_available():
+            logger.warning(
+                "get_market_ohlcv: Postgres no disponible, sirviendo datos SINTÉTICOS para %s", clean_symbol
+            )
             candles = market_data.generate_candles(clean_symbol, fallback_interval, safe_limit)
             return {
                 "symbol": clean_symbol,
@@ -422,6 +425,7 @@ class QueryService:
                 "candles": candles,
                 "source": market_data.SYMBOLS[clean_symbol]["source"],
                 "provenance": "SPEED_LAYER",
+                "data_source": "synthetic_fallback",
                 "watermark": "event-time Â· 2s",
                 "cutoff_time": candles[-1]["timestamp"],
             }
@@ -450,12 +454,17 @@ class QueryService:
                         "candles": candles,
                         "source": "serving.ohlcv_reconciled (Postgres)",
                         "provenance": "SPEED_LAYER",
+                        "data_source": "postgres_reconciled",
                         "watermark": "event-time Â· 2s",
                         "cutoff_time": candles[-1]["timestamp"],
                     }
         except Exception as exc:  # noqa: BLE001
             logger.warning("get_market_ohlcv fallback: %s", exc)
 
+        logger.warning(
+            "get_market_ohlcv: serving.ohlcv_reconciled vacío o con error para %s, "
+            "sirviendo datos SINTÉTICOS", clean_symbol
+        )
         candles = market_data.generate_candles(clean_symbol, fallback_interval, safe_limit)
         return {
             "symbol": clean_symbol,
@@ -464,6 +473,7 @@ class QueryService:
             "candles": candles,
             "source": market_data.SYMBOLS[clean_symbol]["source"],
             "provenance": "SPEED_LAYER",
+            "data_source": "synthetic_fallback",
             "watermark": "event-time Â· 2s",
             "cutoff_time": candles[-1]["timestamp"],
         }
@@ -471,7 +481,12 @@ class QueryService:
     def get_market_metrics(self, symbol: str, window: str = "24h") -> Dict[str, Any]:
         clean_symbol = sanitize_symbol(symbol)
         if not self._postgres_available():
-            return market_data.compute_metrics(clean_symbol, window=window)
+            logger.warning(
+                "get_market_metrics: Postgres no disponible, sirviendo datos SINTÉTICOS para %s", clean_symbol
+            )
+            result = market_data.compute_metrics(clean_symbol, window=window)
+            result["data_source"] = "synthetic_fallback"
+            return result
         try:
             payload = self.get_ohlcv(clean_symbol, interval="1h", limit=24)
             rows = payload.get("data", []) if isinstance(payload, dict) else []
@@ -503,21 +518,66 @@ class QueryService:
                     "low": round(min(float(row.get("low_price", 0)) for row in rows), 8),
                     "source": "serving.ohlcv_reconciled (Postgres)",
                     "provenance": "SPEED_LAYER",
+                    "data_source": "postgres_reconciled",
                     "cutoff_time": _iso(rows[-1].get("bucket_start")),
                     "freshness_seconds": 0.8,
                 }
         except Exception as exc:  # noqa: BLE001
             logger.warning("get_market_metrics fallback: %s", exc)
 
-        return market_data.compute_metrics(clean_symbol, window=window)
+        # `serving.ohlcv_reconciled` depende del DAG `serving_reconcile` (bloqueado
+        # hoy por la dependencia de PySpark en Airflow, ver AGENTS.md). Antes de
+        # rendirnos al dato sintético, probamos con `serving.realtime_metrics`,
+        # que el Speed Layer sí puebla directamente (US-19) y que es dato real,
+        # aunque más limitado (snapshot actual, no serie horaria completa).
+        try:
+            realtime = self.get_metrics(clean_symbol)
+            items = realtime.get("items", []) if isinstance(realtime, dict) else []
+            if items:
+                snapshot = items[0]
+                last_price = float(snapshot.get("last_price") or 0.0)
+                pct_change_5m = float(snapshot.get("pct_change_5m") or 0.0)
+                rolling_volume_5m = float(snapshot.get("rolling_volume_5m") or 0.0)
+                open_price = last_price / (1 + pct_change_5m / 100.0) if (1 + pct_change_5m / 100.0) else last_price
+                return {
+                    "symbol": clean_symbol,
+                    "window": window,
+                    "current_price": round(last_price, 8),
+                    "return_24h": round(pct_change_5m, 4),
+                    "volume_24h": round(rolling_volume_5m, 2),
+                    "volume_base": round(rolling_volume_5m, 8),
+                    "vwap": round(last_price, 8),
+                    "price_variance": 0.0,
+                    "open": round(open_price, 8),
+                    "high": round(last_price, 8),
+                    "low": round(last_price, 8),
+                    "source": "serving.realtime_metrics (Postgres)",
+                    "provenance": "SPEED_LAYER",
+                    "data_source": "postgres_reconciled",
+                    "cutoff_time": _iso(snapshot.get("event_timestamp")),
+                    "freshness_seconds": 0.8,
+                }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_market_metrics realtime_metrics fallback: %s", exc)
+
+        logger.warning(
+            "get_market_metrics: ni serving.ohlcv_reconciled ni serving.realtime_metrics "
+            "tienen datos para %s, sirviendo datos SINTÉTICOS", clean_symbol
+        )
+        result = market_data.compute_metrics(clean_symbol, window=window)
+        result["data_source"] = "synthetic_fallback"
+        return result
 
     def get_market_pipeline_status(self) -> Dict[str, Any]:
         base = market_data.pipeline_status()
+        base["data_source"] = "synthetic_fallback"
         if not self._postgres_available():
             return base
         try:
             payload = self.get_pipeline_status()
             components = payload.get("components", []) if isinstance(payload, dict) else []
+            if components:
+                base["data_source"] = "postgres_reconciled"
             for component in components:
                 name = str(component.get("component", "")).lower()
                 status = str(component.get("status", "SUCCESS")).upper()
