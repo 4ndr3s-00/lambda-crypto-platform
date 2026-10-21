@@ -274,6 +274,114 @@ s3://market-quarantine/
 
 ---
 
+## 7. Arquitectura del Clúster Spark (para compañeros técnicos)
+
+### 🖥️ Estructura del clúster Standalone
+
+El clúster sigue una arquitectura **Master + Workers** clásica (definida por el equipo, sin HA con ZooKeeper):
+
+| Nodo | IP | Recursos | Rol |
+| :--- | :--- | :--- | :--- |
+| **Master** | `10.1.20.20:7077` | - | **Jefe**: Acepta trabajos, decide a qué worker va cada tarea, provee la UI en http://10.1.20.20:8080/ |
+| **Worker 1** | `10.1.20.3` | 4 cores / 4 GiB | **Obrero**: Ejecuta tareas asignadas por el master |
+| **Worker 2** | `172.21.0.5` (Docker) | 2 cores / 1 GiB | **Obrero**: Ejecuta tareas asignadas por el master |
+
+### 📊 Cómo se divide el trabajo (paralelismo)
+
+Cuando se ejecuta un `spark-submit`:
+
+1. **El master** recibe el job y particiona los datos (según `parallelism` o cores disponibles)
+2. **Distribuye tareas** a los workers conectados
+3. **Cada worker procesa sus tareas** en paralelo leyendo directamente de **MinIO**
+4. **Resultados** escritos de vuelta a MinIO (`s3://market-lake/batch-results/`)
+
+**Ejemplo con tus workers:**
+- Worker `10.1.20.3`: 4 cores → procesa 4 tareas simultáneas
+- Worker `172.21.0.5`: 2 cores → procesa 2 tareas simultáneas
+- **Total paralelismo**: 6 tareas al mismo instante
+
+### 📦 ¿Dónde están los datos? (¡Muy importante!)
+
+**Los datos NUNCA están localmente en los workers.** Siempre están en **MinIO** (Data Lake S3-compatible), accesible para todos los nodes:
+
+```
+                    ✅ Worker 1 (10.1.20.3)
+                   /              \
+                  /                \
+                 /      Datos en MinIO      \
+                /          s3://market-lake/       \
+               /                                      \
+   Master (10.1.20.20)                                  ✅ Worker 2 (172.21.0.5)
+                \                                      /
+                 \      Cada worker lee directamente    /
+                  \      de MinIO en tiempo real      /
+                   \              (mismo endpoint)   /
+                    ════════════════════════════════
+
+**Nota:** El worker necesita credenciales MinIO (en `spark-env.sh`) para poder leer, pero los datos en sí son globales y compartidos.
+```
+
+### 🛠️ Configuración requerida en cada worker
+
+Para que un worker se conecte y trabaje correctamente, debe tener en su `spark-env.sh`:
+
+```bash
+# Recursos del worker
+export SPARK_WORKER_CORES=4
+export SPARK_WORKER_MEMORY=4G
+
+# Credenciales MinIO (S3A) - OBLIGATORIO para leer datos
+export S3_ENDPOINT=http://minio:9000
+export AWS_ACCESS_KEY_ID=spark_service
+export AWS_SECRET_ACCESS_KEY=spark_secure_lake_pass123
+export AWS_REGION=us-east-1
+
+# URL del master (debe coincidir con el que usa el master)
+export SPARK_MASTER_URL=spark://10.1.20.20:7077
+```
+
+**Para verificar que el worker está conectado:**
+- Entrá a http://10.1.20.20:8080/
+- Deberías ver: "Worker: 10.1.20.3 (4 cores, 4GB memory) - ALIVE"
+- O: "Worker: 172.21.0.5 (2 cores, 1GB memory) - ALIVE"
+
+### 🚀 Ejecutar jobs desde cualquier máquina
+
+Los comandos `spark-submit` se ejecutan desde cualquier máquina con acceso de red, apuntando al master:
+
+```bash
+# Ejemplo desde el host o cualquier PC en la red
+spark-submit \
+  --master spark://10.1.20.20:7077 \
+  spark/batch_historical.py \
+  --start-date 2026-09-01 \
+  --end-date 2026-09-30 \
+  --symbols BTCUSDT,ETHUSDT \
+  --metrics ohlcv,returns
+```
+
+Spark se conectará al master, que distribuirá las tareas entre los workers disponibles.
+
+### ⚠️ Errores comunes con workers
+
+| Síntoma | Causa | Solución |
+| :--- | :--- | :--- |
+| `403 Forbidden` al leer MinIO | IAM sin permisos de traversal | `fix(minio)` en `infra/minio/` |
+| Worker aparece DOWN en UI | Worker desconectado del master | Reiniciar worker o verificar red |
+| `No module named 'py4j'` | El worker no encuentra py4j | `PYSPARK_PYTHON=/opt/bitnami/spark/venv/bin/python` |
+| No se pueden escalar workers | `container_name` fijo en docker-compose | Usar `infra/docker-compose.scale.yml` |
+
+### 💡 Punto clave para compañeros
+
+**No muevas ni sincronices datos manualmente entre machines.** Los datos son globales en MinIO (`market-lake/`). Cualquier worker conectado al master puede procesar cualquier dato que esté en MinIO, en cualquier momento. El flujo es siempre:
+1. Master recibe job
+2. Master distribuye tareas a workers
+3. Workers leen de MinIO en tiempo real
+4. Workers escriben resultados a MinIO
+5. Master coordina y reporta éxito/fail
+
+---
+
 ## 7. Contrato Canónico de Eventos
 
 Todo evento emitido por los conectores REST, WebSockets o CSV hacia Kafka (`market.events`) debe validar contra [`ingestion/contracts/market_event.schema.json`](ingestion/contracts/market_event.schema.json):
