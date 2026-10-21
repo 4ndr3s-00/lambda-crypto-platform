@@ -308,7 +308,7 @@ def read_speed_snapshot(spark, pg_conn_params: dict, interval: str, symbols: lis
     if symbols:
         raw = raw.filter(F.col("symbol").isin(symbols))
 
-    seconds = {"1m": 60, "5m": 300, "1h": 3600, "1d": 86400}.get(interval, 300)
+    seconds = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "1d": 86400}.get(interval, 300)
     bucket_start = F.from_unixtime(
         (F.unix_timestamp("event_timestamp") / seconds).cast("long") * seconds
     ).cast("timestamp")
@@ -404,7 +404,7 @@ def parse_args(argv=None) -> argparse.Namespace:
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--intervals", type=str, default="1m,5m,1h,1d")
+    parser.add_argument("--intervals", type=str, default="1m,5m,15m,1h,1d")
     parser.add_argument("--symbols", type=str, default=None, help="Lista separada por comas, ej. BTCUSDT,ETHUSDT")
     parser.add_argument("--postgres-host", type=str, default=os.environ.get("POSTGRES_HOST", "postgres"))
     parser.add_argument("--postgres-port", type=str, default=os.environ.get("POSTGRES_PORT", "5432"))

@@ -78,7 +78,7 @@ def build_reconcile_command(**context) -> List[str]:
     conf = (dag_run.conf if dag_run else {}) or {}
     params = context.get("params") or {}
 
-    intervals = conf.get("intervals") or params.get("intervals") or "1m,5m,1h,1d"
+    intervals = conf.get("intervals") or params.get("intervals") or "1m,5m,15m,1h,1d"
     symbols = conf.get("symbols") or params.get("symbols")
 
     command = [
@@ -174,7 +174,7 @@ if DAG is not None:
         tags=["serving", "spark", "reconciliation", "lambda-architecture"],
         on_failure_callback=handle_task_failure,
         params={
-            "intervals": "1m,5m,1h,1d",
+            "intervals": "1m,5m,15m,1h,1d",
             "symbols": None,
         },
     ) as dag:

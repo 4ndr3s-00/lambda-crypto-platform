@@ -237,10 +237,40 @@
         pip install --no-cache-dir psycopg2-binary==2.9.9 && \
         exec /opt/bitnami/spark/bin/spark-submit \
           --master spark://spark-master:7077 \
+          --executor-memory 512m \
+          --executor-cores 1 \
+          --total-executor-cores 1 \
           --conf spark.jars.ivy=/tmp/spark-home/.ivy2 \
           --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.postgresql:postgresql:42.7.3 \
           /opt/bitnami/spark/jobs/streaming_market.py \
           --bootstrap-servers kafka:9092
+    networks:
+      - lambda-net
+
+  # Productor REST continuo: Binance bloquea el WebSocket con HTTP 451 en
+  # algunas regiones, pero el espejo `data-api.binance.vision` responde.
+  market-producer:
+    build:
+      context: ..
+      dockerfile: infra/ingestion/Dockerfile
+    container_name: lambda-market-producer
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - BINANCE_API_BASE=${BINANCE_API_BASE:-https://data-api.binance.vision}
+    command:
+      - python
+      - -m
+      - ingestion.connectors.market_rest_stream
+      - --symbols
+      - BTCUSDT,ETHUSDT,SOLUSDT
+      - --bootstrap
+      - kafka:9092
+      - --poll-interval
+      - "2"
     networks:
       - lambda-net
 
@@ -295,6 +325,11 @@
       AWS_ACCESS_KEY_ID: ${AIRFLOW_MINIO_USER:-airflow_service}
       AWS_SECRET_ACCESS_KEY: ${AIRFLOW_MINIO_PASSWORD:-airflow_secure_lake_pass123}
       AIRFLOW_CONN_MINIO_DEFAULT: aws://${AIRFLOW_MINIO_USER:-airflow_service}:${AIRFLOW_MINIO_PASSWORD:-airflow_secure_lake_pass123}@?endpoint_url=http%3A%2F%2Fminio%3A9000
+      # La reconciliación corre junto al streaming: 512m/1 core por executor
+      # permite que ambos entren en el worker de 1G/2 cores.
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-512m}
+      SPARK_EXECUTOR_MEMORY: ${SPARK_EXECUTOR_MEMORY:-512m}
+      SPARK_EXECUTOR_CORES: ${SPARK_EXECUTOR_CORES:-1}
     ports:
       - "${AIRFLOW_WEBSERVER_PORT:-8085}:8080"
     volumes:

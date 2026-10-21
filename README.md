@@ -185,13 +185,44 @@ Para volver a la configuración de un solo worker:
 make scale-down
 ```
 
-### 6. (Opcional) Levantar con LLM local Qwen2.5 (Ollama)
+### 6. Pipeline en vivo: Speed Layer + Serving
+
+El compose levanta dos servicios que cierran el circuito de datos:
+
+- `market-producer`: polling REST contra `data-api.binance.vision` y publicación
+  de eventos canónicos en `market.events`. Se usa porque Binance bloquea el
+  WebSocket con HTTP 451 en algunas regiones.
+- `spark-streaming`: Structured Streaming con watermark, deduplicación, DLQ y
+  sink JDBC a `serving.realtime_metrics`.
+
+El DAG `serving_reconcile` corre cada 5 minutos, mezcla la ruta Batch de MinIO
+con el snapshot de Speed y escribe `serving.ohlcv_reconciled`. La API prioriza
+esa tabla y expone `data_source` (`postgres_reconciled`, `exchange_live` o
+`synthetic_fallback`) para que el frontend no confunda un dato real con uno
+simulado.
+
+Verificación rápida:
+
+```bash
+docker compose -f infra/docker-compose.yml -p infra ps
+docker exec lambda-postgres psql -U postgres -d serving_db \
+  -c "SELECT symbol, count(*), max(event_timestamp) FROM serving.realtime_metrics GROUP BY symbol;"
+docker exec lambda-postgres psql -U postgres -d serving_db \
+  -c "SELECT timeframe, count(*), max(bucket_start) FROM serving.ohlcv_reconciled GROUP BY timeframe;"
+curl "http://localhost:8000/api/market/ohlcv?symbol=BTCUSDT&interval=15m&limit=5"
+```
+
+El DAG requiere `pyspark==3.5.1` en la imagen de Airflow; ya viene incluido en
+`infra/airflow/Dockerfile`. Para que streaming y reconciliación convivan en el
+worker de 1G/2 cores, ambos usan `512m` de executor y `1` core.
+
+### 7. (Opcional) Levantar con LLM local Qwen2.5 (Ollama)
 Si tu equipo cuenta con al menos 12 GB de RAM o GPU dedicada:
 ```bash
 make up-all
 ```
 
-### 7. Ejecutar el Spark Batch (capa Batch)
+### 8. Ejecutar el Spark Batch (capa Batch)
 
 El job `spark/batch_historical.py` lee el histórico de MinIO vía S3A,
 normaliza y deduplica los eventos, y calcula las velas OHLCV y los retornos
@@ -225,7 +256,7 @@ Opciones disponibles:
 El mismo recálculo puede dispararse desde Airflow con el DAG
 `batch_recompute`, que por defecto procesa el día anterior a las 02:00 UTC.
 
-### 8. Ejecutar las pruebas
+### 9. Ejecutar las pruebas
 
 Las pruebas de la capa Spark usan una SparkSession local, por lo que no
 necesitan el clúster en marcha:
