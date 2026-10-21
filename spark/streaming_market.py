@@ -78,6 +78,16 @@ DEFAULT_SLIDE_DURATION = "1 minute"
 DEFAULT_METRICS_OUTPUT_MODE = "update"
 DEFAULT_CHECKPOINT_DIR = checkpoints_path("spark/query=market-stream")
 
+# Configuración de Postgres (serving_db) para el sink de `serving.realtime_metrics`.
+# Usa las mismas variables que `api/query_service.py` para no duplicar convenciones.
+DEFAULT_POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "postgres")
+DEFAULT_POSTGRES_PORT = os.environ.get("POSTGRES_PORT", "5432")
+DEFAULT_POSTGRES_DB = os.environ.get("SERVING_DB_NAME", os.environ.get("POSTGRES_DB", "serving_db"))
+DEFAULT_POSTGRES_USER = os.environ.get("SERVING_DB_USER", os.environ.get("POSTGRES_USER", "postgres"))
+DEFAULT_POSTGRES_PASSWORD = os.environ.get(
+    "SERVING_DB_PASSWORD", os.environ.get("POSTGRES_PASSWORD", "postgres_secure_pass")
+)
+
 
 # ==============================================================================
 # CLI (US-18 y US-19)
@@ -164,6 +174,20 @@ def parse_args(argv=None) -> argparse.Namespace:
         action="store_true",
         help="Valida parámetros y configuración de sesión sin iniciar bucle infinito.",
     )
+    parser.add_argument(
+        "--disable-postgres-sink",
+        action="store_true",
+        help=(
+            "Desactiva la escritura de métricas en `serving.realtime_metrics`. "
+            "Por defecto el sink a Postgres está activo: es lo que permite que "
+            "la API sirva datos reales en vez del fallback sintético."
+        ),
+    )
+    parser.add_argument("--postgres-host", type=str, default=DEFAULT_POSTGRES_HOST)
+    parser.add_argument("--postgres-port", type=str, default=DEFAULT_POSTGRES_PORT)
+    parser.add_argument("--postgres-db", type=str, default=DEFAULT_POSTGRES_DB)
+    parser.add_argument("--postgres-user", type=str, default=DEFAULT_POSTGRES_USER)
+    parser.add_argument("--postgres-password", type=str, default=DEFAULT_POSTGRES_PASSWORD)
 
     return parser.parse_args(argv)
 
@@ -536,6 +560,103 @@ def start_metrics_kafka_query(
     return writer.start()
 
 
+def upsert_realtime_metrics(pg_conn_params: dict, rows: list) -> None:
+    """
+    Hace upsert de un lote de métricas de ventana en `serving.realtime_metrics`.
+
+    `serving.realtime_metrics` tiene `symbol` como clave primaria (una sola fila
+    "último valor conocido" por activo), así que cada micro-batch sobrescribe
+    la fila si trae un `event_timestamp` más reciente que el ya almacenado
+    (evita que una ventana rezagada pise una más nueva en reprocesos).
+
+    Un mismo micro-batch trae varias ventanas deslizantes solapadas del mismo
+    símbolo (ventana de 5 min cada 1 min): hay que quedarse con una sola fila
+    por símbolo (la de `window_end` más reciente) antes del upsert, porque
+    Postgres no permite que `ON CONFLICT DO UPDATE` afecte la misma fila dos
+    veces dentro del mismo statement (`CardinalityViolation`).
+    """
+    if not rows:
+        return
+
+    latest_by_symbol: dict = {}
+    for row in rows:
+        symbol = row["symbol"]
+        current = latest_by_symbol.get(symbol)
+        if current is None or row["window_end"] > current["window_end"]:
+            latest_by_symbol[symbol] = row
+    rows = list(latest_by_symbol.values())
+
+    import psycopg2
+    from psycopg2.extras import execute_values
+
+    query = """
+        INSERT INTO serving.realtime_metrics (
+            symbol, last_price, rolling_volume_5m, pct_change_5m,
+            event_timestamp, ingestion_timestamp, reconciled_at
+        ) VALUES %s
+        ON CONFLICT (symbol) DO UPDATE SET
+            last_price = EXCLUDED.last_price,
+            rolling_volume_5m = EXCLUDED.rolling_volume_5m,
+            pct_change_5m = EXCLUDED.pct_change_5m,
+            event_timestamp = EXCLUDED.event_timestamp,
+            ingestion_timestamp = EXCLUDED.ingestion_timestamp,
+            reconciled_at = CURRENT_TIMESTAMP
+        WHERE EXCLUDED.event_timestamp >= serving.realtime_metrics.event_timestamp;
+    """
+    values = [
+        (
+            row["symbol"],
+            row["last_price"],
+            row["volume"],
+            row["price_change_pct"],
+            row["window_end"],
+            row["computed_at"],
+            row["computed_at"],
+        )
+        for row in rows
+    ]
+
+    conn = psycopg2.connect(connect_timeout=5, **pg_conn_params)
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                execute_values(cur, query, values)
+    finally:
+        conn.close()
+
+
+def make_postgres_metrics_sink(pg_conn_params: dict):
+    """
+    Construye la función `foreachBatch` que persiste cada micro-batch de
+    métricas de ventana en `serving.realtime_metrics` (Postgres), que es la
+    tabla que lee `api/query_service.py`. Sin este sink, la tabla queda vacía
+    y la API siempre cae al dato sintético de `market_data.py`.
+    """
+
+    def _sink(batch_df: DataFrame, batch_id: int) -> None:
+        rows = [row.asDict() for row in batch_df.collect()]
+        upsert_realtime_metrics(pg_conn_params, rows)
+
+    return _sink
+
+
+def start_metrics_postgres_query(
+    metrics_raw_df: DataFrame,
+    pg_conn_params: dict,
+    checkpoint_location: str = None,
+):
+    """Lanza la consulta de streaming que persiste métricas en Postgres (serving.realtime_metrics)."""
+    writer = (
+        metrics_raw_df.writeStream
+        .foreachBatch(make_postgres_metrics_sink(pg_conn_params))
+        .outputMode("update")
+    )
+    if checkpoint_location:
+        writer = writer.option("checkpointLocation", checkpoint_location)
+
+    return writer.start()
+
+
 def start_console_query(
     stream_df: DataFrame,
     checkpoint_location: str = None,
@@ -616,6 +737,7 @@ def main(argv=None):
     spark = build_spark_session(
         app_name="streaming-market-speed",
         enable_kafka=True,
+        enable_postgres=not args.disable_postgres_sink,
     )
 
     if args.dry_run:
@@ -662,7 +784,27 @@ def main(argv=None):
         f"[modo: {args.metrics_output_mode}] (Query ID: {metrics_query.id})"
     )
 
-    # 5. Monitoreo por consola si fue solicitado
+    # 5. Rama Postgres: sink de métricas hacia `serving.realtime_metrics` (US-22/23)
+    if not args.disable_postgres_sink:
+        postgres_checkpoint = os.path.join(args.checkpoint_dir, "postgres")
+        pg_conn_params = {
+            "host": args.postgres_host,
+            "port": args.postgres_port,
+            "dbname": args.postgres_db,
+            "user": args.postgres_user,
+            "password": args.postgres_password,
+        }
+        postgres_query = start_metrics_postgres_query(
+            metrics_raw_df=metrics_raw,
+            pg_conn_params=pg_conn_params,
+            checkpoint_location=postgres_checkpoint,
+        )
+        print(
+            f"🗄️  Query Postgres activa hacia 'serving.realtime_metrics' "
+            f"(Query ID: {postgres_query.id})"
+        )
+
+    # 6. Monitoreo por consola si fue solicitado
     if args.console_sink:
         console_checkpoint = os.path.join(args.checkpoint_dir, "console")
         start_console_query(

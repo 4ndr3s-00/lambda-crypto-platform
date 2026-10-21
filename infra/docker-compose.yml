@@ -187,6 +187,63 @@ services:
     networks:
       - lambda-net
 
+  # Job de Spark Structured Streaming de larga duración (Speed Layer, US-18/19).
+  # Sin este servicio, `streaming_market.py` solo corre si alguien lo lanza a
+  # mano por terminal: `serving.realtime_metrics` nunca se actualiza y la API
+  # cae siempre al dato sintético de `api/market_data.py`.
+  spark-streaming:
+    image: bitnamilegacy/spark:3.5.1
+    container_name: lambda-spark-streaming
+    restart: unless-stopped
+    # La imagen bitnami corre por defecto con el UID 1001, que no tiene
+    # entrada en /etc/passwd. Hadoop (usado por `--packages` y S3A) necesita
+    # resolver el usuario del sistema operativo incluso en modo simple y
+    # revienta con `LoginException: invalid null input: name` si no existe
+    # esa entrada. Root sí la tiene.
+    user: "0:0"
+    depends_on:
+      spark-master:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - SERVING_DB_NAME=serving_db
+      - SERVING_DB_USER=${POSTGRES_USER:-postgres}
+      - SERVING_DB_PASSWORD=${POSTGRES_PASSWORD:-postgres_secure_pass}
+      - AWS_ACCESS_KEY_ID=${SPARK_MINIO_USER:-spark_service}
+      - AWS_SECRET_ACCESS_KEY=${SPARK_MINIO_PASSWORD:-spark_secure_lake_pass123}
+      - AWS_REGION=us-east-1
+      - S3_ENDPOINT=http://minio:9000
+      - HOME=/tmp/spark-home
+      - HADOOP_USER_NAME=spark
+      - USER=spark
+    volumes:
+      - ../spark:/opt/bitnami/spark/jobs:ro
+    # La imagen bitnami/spark no trae psycopg2 (lo usa el sink de
+    # `serving.realtime_metrics`); se instala al arrancar para no mantener
+    # una imagen custom solo por esta dependencia. `HOME` se fija porque la
+    # imagen no lo define y Spark resuelve `~/.ivy2` a una ruta inválida
+    # ("basedir must be absolute") al resolver --packages sin él.
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        mkdir -p "$$HOME" && \
+        pip install --no-cache-dir psycopg2-binary==2.9.9 && \
+        exec /opt/bitnami/spark/bin/spark-submit \
+          --master spark://spark-master:7077 \
+          --conf spark.jars.ivy=/tmp/spark-home/.ivy2 \
+          --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,org.postgresql:postgresql:42.7.3 \
+          /opt/bitnami/spark/jobs/streaming_market.py \
+          --bootstrap-servers kafka:9092
+    networks:
+      - lambda-net
+
   # ----------------------------------------------------------------------------
   # 5. Apache Airflow: Orquestador Batch
   # ----------------------------------------------------------------------------

@@ -38,6 +38,7 @@ def build_spark_session(
     app_name: str,
     master_url: str = None,
     enable_kafka: bool = False,
+    enable_postgres: bool = False,
 ) -> SparkSession:
     """
     Crea (o reutiliza) la `SparkSession` conectada al clúster y a MinIO.
@@ -76,12 +77,14 @@ def build_spark_session(
         .config("spark.sql.session.timeZone", "UTC")
     )
 
-    # Añadir soporte de conectores Kafka si se solicita o vía entorno
+    # Añadir soporte de conectores Kafka y/o JDBC Postgres si se solicita o vía entorno
+    packages = []
     if enable_kafka or os.environ.get("SPARK_ENABLE_KAFKA", "").lower() in ("true", "1", "yes"):
-        builder = builder.config(
-            "spark.jars.packages",
-            "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1",
-        )
+        packages.append("org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1")
+    if enable_postgres or os.environ.get("SPARK_ENABLE_POSTGRES", "").lower() in ("true", "1", "yes"):
+        packages.append("org.postgresql:postgresql:42.7.3")
+    if packages:
+        builder = builder.config("spark.jars.packages", ",".join(packages))
 
     # Añadir soporte de OpenLineage listener (US-26)
     if os.environ.get("OPENLINEAGE_ENABLED", "").lower() in ("true", "1", "yes"):
