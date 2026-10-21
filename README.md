@@ -22,7 +22,7 @@ Esta plataforma implementa **Arquitectura Lambda** clásica de tres capas fundam
                                │  APIs REST · WebSockets · CSV  │
                                └───────────────┬────────────────┘
                                                │
-                                               ▼
+                                               â–¼
                                ┌────────────────────────────────┐
                                │  Bus de Eventos (Apache Kafka) │
                                │  Topics · Particiones · DLQ    │
@@ -30,7 +30,7 @@ Esta plataforma implementa **Arquitectura Lambda** clásica de tres capas fundam
                                        │                │
                      eventos históricos│                │eventos recientes
                                / replay│                │
-                                       ▼                ▼
+                                       â–¼                â–¼
 ┌──────────────────────────────────────────────┐  ┌──────────────────────────────────────────────┐
 │                 BATCH LAYER                  │  │                 SPEED LAYER                  │
 │ • Airflow orquesta extracciones y backfills  │  │ • Spark Structured Streaming (baja latencia) │
@@ -42,14 +42,14 @@ Esta plataforma implementa **Arquitectura Lambda** clásica de tres capas fundam
                        │ consolidados                                    │ (ventanas cortas)
                        └───────────────────────┬─────────────────────────┘
                                                │
-                                               ▼
+                                               â–¼
                                ┌────────────────────────────────┐
                                │         SERVING LAYER          │
                                │  Reconciliación por Event-Time │
                                │  Deduplicación & Precedencia   │
                                └───────────────┬────────────────┘
                                                │
-                                               ▼
+                                               â–¼
                                ┌────────────────────────────────┐
                                │    FastAPI + Dashboard HTML    │
                                │  + Asistente Local (Qwen 2.5)  │
@@ -340,20 +340,47 @@ La capa de IA vive en `api/` y tiene dos modos:
 make rag-index                 # reconstruye metadata/rag_index.json
 make up-all                    # Ollama + ollama-init (pull del modelo)
 pip install -r api/requirements-llm.txt   # ChromaDB opcional
-make test                      # 35 tests
+make test                      # 48 tests
 ```
 
-## 11. Dashboard y API de mercado
+## 11. Dashboard V7 · IQ Analyzer & Crypto Streaming Suite
 
-El frontend se sirve en `http://localhost:8000/` y consume:
+El frontend es una app **Next.js** (`frontend/`) que se exporta estático y FastAPI la sirve en `http://localhost:8000/` (Docker). También se puede desarrollar con `npm run dev` en `http://localhost:3000`.
 
-- `GET /api/market/assets`
-- `GET /api/market/ohlcv?symbol=&interval=&limit=`
-- `GET /api/market/metrics?symbol=&window=`
-- `GET /api/market/pipeline`
-- `POST /api/chat` y `GET /api/chat/stream` (SSE)
+Incluye:
 
-Incluye velas OHLCV + volumen en Canvas, crosshair, KPIs, polling cada 5s, panel de salud Kafka/Spark/Airflow/MinIO/DLQ con alerta > 60s y chat con fuentes, corte, SQL y disclaimer.
+- **View 1:** consola AI con partículas, input flotante, streaming de respuesta, SQL inspector y artefactos.
+- **View 2:** card deck multi-activo (`BTC`, `ETH`, `SOL`, `BNB`) con precio streaming, 24h, sparkline, funding y OBI.
+- **Deep dive** al hacer click en una card: velas OHLCV + volumen, Order Book L2 con gauge OBI, execution tape con filtro de ballenas, matriz de arbitraje cross-exchange, liquidation radar y on-chain/macro (netflow, OI, long/short, MVRV).
+- Telemetría global: latencia WS, throughput, funding countdown, gas y Fear & Greed.
+- Chat con `/api/chat` / SSE, fuentes, fecha de corte y disclaimer.
+
+### Desarrollo local
+
+```bash
+# API en Docker (o uvicorn en :8000)
+docker compose -f infra/docker-compose.yml -p infra --env-file .env --profile llm up -d
+
+# Frontend Next.js en :3000
+cd frontend
+npm ci
+npm run dev
+```
+
+El frontend detecta automáticamente `http://localhost:8000` cuando corre en `:3000`. Para otro host:
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://mi-api:8000 npm run dev
+```
+
+### Docker (flujo real)
+
+`api/Dockerfile` hace un build multi-stage: compila Next.js (`output: "export"`) y copia `out/` a `/app/static`. La API sirve el dashboard en `:8000`.
+
+```bash
+docker compose -f infra/docker-compose.yml -p infra --env-file .env build api
+docker compose -f infra/docker-compose.yml -p infra --env-file .env up -d api
+```
 
 Los endpoints originales de US-22 (`/api/health`, `/api/assets`, `/api/ohlcv`, `/api/metrics`, `/api/pipeline/status`) se mantienen intactos para no romper su contrato ni sus tests.
 
@@ -384,7 +411,7 @@ y recreá el worker:
 docker compose -f infra/docker-compose.yml -p infra --env-file .env up -d --force-recreate spark-worker
 ```
 
-### “Mi frontend se ve distinto”
+### "Mi frontend se ve distinto"
 Verificá primero que estén en el mismo commit y en el mismo repo:
 
 ```bash

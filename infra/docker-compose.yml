@@ -259,7 +259,8 @@ services:
   # ----------------------------------------------------------------------------
   api:
     build:
-      context: ../api
+      context: ..
+      dockerfile: api/Dockerfile
     container_name: lambda-serving-api
     restart: unless-stopped
     depends_on:
@@ -289,7 +290,6 @@ services:
       - "${API_PORT:-8000}:8000"
     volumes:
       - ../api:/app/api
-      - ../frontend:/app/static:ro
       - ../metadata:/app/metadata
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]

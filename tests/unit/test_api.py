@@ -11,7 +11,7 @@ def test_market_endpoints_and_frontend() -> None:
         index = client.get("/")
         assert index.status_code == 200
         assert "IQ ANALYZER" in index.text
-        assert "app.js" in index.text
+        assert "_next/static" in index.text
 
         assets = client.get("/api/market/assets").json()
         assert {asset["symbol"] for asset in assets["assets"]} >= {"BTCUSDT", "ETHUSDT"}

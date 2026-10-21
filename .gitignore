@@ -75,3 +75,11 @@ metadata/rag_index.json
 metadata/rag_index.chroma/
 .pytest_cache/
 
+
+# Next.js frontend build artifacts
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+frontend/*.tsbuildinfo
+
