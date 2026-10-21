@@ -16,10 +16,8 @@ import type {
   MarketTicker,
   ViewMode,
 } from "@/lib/types";
-import { INITIAL_TICKERS, QUICK_PROMPTS, mockApi, tickMarket } from "@/lib/mockData";
+import { QUICK_PROMPTS, mockApi } from "@/lib/mockData";
 import { cn } from "@/lib/utils";
-
-const TICK_INTERVAL_MS = 1600;
 
 const CAPSULE_SPRING = {
   type: "spring" as const,
@@ -41,7 +39,7 @@ export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [tickers, setTickers] = useState<MarketTicker[]>(INITIAL_TICKERS);
+  const [tickers, setTickers] = useState<MarketTicker[]>([]);
 
   const generatingRef = useRef(false);
   const timersRef = useRef<number[]>([]);
@@ -52,10 +50,31 @@ export default function Home() {
 
   /* Live market ribbon ------------------------------------------------ */
   useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setTickers((prev) => tickMarket(prev));
-    }, TICK_INTERVAL_MS);
-    return () => window.clearInterval(intervalId);
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const overview = await mockApi.getOverview();
+        if (cancelled) return;
+        setTickers(
+          overview.assets
+            .filter((asset) => asset.isLive)
+            .map((asset) => ({
+              symbol: asset.base,
+              pair: `${asset.base}/USDT`,
+              price: asset.price,
+              changePercent: asset.change24h,
+            })),
+        );
+      } catch {
+        // Sin exchange no mostramos precios inventados en el ribbon.
+      }
+    };
+    void load();
+    const intervalId = window.setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   /* Timer cleanup ------------------------------------------------------ */
@@ -150,8 +169,8 @@ export default function Home() {
               onClick={() => setView("STREAMING_DASHBOARD")}
               className="pointer-events-auto whitespace-nowrap rounded-full border border-white/10 px-3 py-1.5 font-mono text-[10px] tracking-wide text-zinc-300 transition-colors duration-200 hover:border-white/25 hover:text-white active:scale-[0.98] sm:text-[11px]"
             >
-              <span className="hidden sm:inline">📊 Dashboard en Vivo →</span>
-              <span className="sm:hidden">📊 Dashboard →</span>
+              <span className="hidden sm:inline"> Dashboard en Vivo →</span>
+              <span className="sm:hidden"> Dashboard →</span>
             </button>
           </div>
 

@@ -1,6 +1,6 @@
-services:
+﻿services:
   # ----------------------------------------------------------------------------
-  # 1. MinIO: Data Lake de Almacenamiento Duradero (Organización Funcional)
+  # 1. MinIO: Data Lake de Almacenamiento Duradero (OrganizaciÃ³n Funcional)
   # ----------------------------------------------------------------------------
   minio:
     image: cgr.dev/chainguard/minio:latest
@@ -277,6 +277,7 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${API_MINIO_USER:-api_service}
       MINIO_SECRET_KEY: ${API_MINIO_PASSWORD:-api_secure_serving_pass123}
+      BINANCE_API_BASE: ${BINANCE_API_BASE:-https://data-api.binance.vision}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b-instruct}
       OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-60}
@@ -337,7 +338,7 @@ services:
       - lambda-net
 
   # ----------------------------------------------------------------------------
-  # 8. OpenMetadata & OpenSearch: Catálogo de Datos, Linaje y Calidad (Perfil 'metadata')
+  # 8. OpenMetadata & OpenSearch: CatÃ¡logo de Datos, Linaje y Calidad (Perfil 'metadata')
   # ----------------------------------------------------------------------------
   opensearch:
     image: opensearchproject/opensearch:2.11.0

@@ -42,6 +42,9 @@ class OHLCVResponse(BaseModel):
     provenance: Provenance = "SPEED_LAYER"
     watermark: str = "event-time · 2s"
     cutoff_time: str
+    is_live: bool = True
+    fetched_at: str | None = None
+    error: str | None = None
 
 
 class MetricsResponse(BaseModel):
@@ -60,6 +63,68 @@ class MetricsResponse(BaseModel):
     provenance: Provenance = "SPEED_LAYER"
     cutoff_time: str
     freshness_seconds: float
+    is_live: bool = True
+    fetched_at: str | None = None
+    error: str | None = None
+
+
+class OverviewAsset(BaseModel):
+    symbol: str
+    base: str
+    quote: str
+    exchange: str
+    price: float
+    change_24h: float
+    volume_24h: float
+    sparkline: list[float]
+    source: str
+    is_live: bool
+    fetched_at: str
+    error: str | None = None
+
+
+class MarketOverviewResponse(BaseModel):
+    assets: list[OverviewAsset]
+    source: str
+    is_live: bool
+    fetched_at: str
+    errors: list[str] = Field(default_factory=list)
+
+
+class OrderBookLevelResponse(BaseModel):
+    price: float
+    size: float
+    total: float
+
+
+class OrderBookResponse(BaseModel):
+    symbol: str
+    bids: list[OrderBookLevelResponse]
+    asks: list[OrderBookLevelResponse]
+    spread: float
+    spread_pct: float
+    obi: float
+    source: str
+    is_live: bool
+    fetched_at: str
+
+
+class TradeItem(BaseModel):
+    id: str
+    timestamp: str
+    price: float
+    size: float
+    notional: float
+    side: Literal["buy", "sell"]
+    whale: bool
+
+
+class TradesResponse(BaseModel):
+    symbol: str
+    trades: list[TradeItem]
+    source: str
+    is_live: bool
+    fetched_at: str
 
 
 class KafkaStatus(BaseModel):

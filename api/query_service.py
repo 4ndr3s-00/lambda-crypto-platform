@@ -27,6 +27,11 @@ try:
 except ImportError:  # Docker / uvicorn main:app
     import market_data
 
+try:
+    from . import exchange_client
+except ImportError:  # Docker / uvicorn main:app
+    import exchange_client
+
 
 class QueryServiceError(RuntimeError):
     """Error de consulta controlado para la capa de serving."""
@@ -414,28 +419,17 @@ class QueryService:
 
     def get_market_ohlcv(self, symbol: str, interval: str = "15m", limit: int = 96) -> Dict[str, Any]:
         clean_symbol = sanitize_symbol(symbol)
+        if clean_symbol not in market_data.SYMBOLS:
+            raise ValueError(f"simbolo no soportado: {symbol}. Validos: {', '.join(market_data.SUPPORTED_SYMBOLS)}")
         if interval not in market_data.INTERVALS:
-            raise ValueError(f"interval no soportado: {interval}. Válidos: {', '.join(market_data.SUPPORTED_INTERVALS)}")
+            raise ValueError(f"interval no soportado: {interval}. V?lidos: {', '.join(market_data.SUPPORTED_INTERVALS)}")
         safe_limit = max(1, min(int(limit), 500))
-        fallback_interval = interval
 
-        if not self._postgres_available():
-            candles = market_data.generate_candles(clean_symbol, fallback_interval, safe_limit)
-            return {
-                "symbol": clean_symbol,
-                "interval": fallback_interval,
-                "limit": safe_limit,
-                "candles": candles,
-                "source": market_data.SYMBOLS[clean_symbol]["source"],
-                "provenance": "SPEED_LAYER",
-                "watermark": "event-time · 2s",
-                "cutoff_time": candles[-1]["timestamp"],
-            }
-
-        try:
-            payload = self.get_ohlcv(clean_symbol, interval=interval, limit=safe_limit)
-            rows = payload.get("data", []) if isinstance(payload, dict) else []
-            if rows:
+        # 1) Serving tables populated by the real Kafka/Spark pipeline.
+        if self._postgres_available():
+            try:
+                payload = self.get_ohlcv(clean_symbol, interval=interval, limit=safe_limit)
+                rows = payload.get("data", []) if isinstance(payload, dict) else []
                 candles = [
                     {
                         "timestamp": _iso(row.get("bucket_start")),
@@ -447,7 +441,7 @@ class QueryService:
                     }
                     for row in rows
                 ]
-                candles = [c for c in candles if c["close"] > 0]
+                candles = [candle for candle in candles if candle["close"] > 0]
                 if candles:
                     return {
                         "symbol": clean_symbol,
@@ -456,66 +450,183 @@ class QueryService:
                         "candles": candles,
                         "source": "serving.ohlcv_reconciled (Postgres)",
                         "provenance": "SPEED_LAYER",
-                        "watermark": "event-time · 2s",
+                        "watermark": "event-time ? 2s",
                         "cutoff_time": candles[-1]["timestamp"],
+                        "is_live": True,
+                        "fetched_at": _iso(datetime.now(timezone.utc)),
                     }
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("get_market_ohlcv fallback: %s", exc)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("get_market_ohlcv Postgres fallback: %s", exc)
 
-        candles = market_data.generate_candles(clean_symbol, fallback_interval, safe_limit)
+        # 2) Real public exchange data (Binance REST).
+        try:
+            live = exchange_client.fetch_klines(clean_symbol, interval, safe_limit)
+            return {
+                **live,
+                "provenance": "SPEED_LAYER",
+                "watermark": "Binance REST ? cache 5s",
+                "cutoff_time": live["candles"][-1]["timestamp"],
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_market_ohlcv Binance fallback: %s", exc)
+            exchange_error = str(exc)
+
+        # 3) Deterministic synthetic fallback, explicitly marked so the UI
+        #    never displays invented prices as if they were live.
+        candles = market_data.generate_candles(clean_symbol, interval, safe_limit)
         return {
             "symbol": clean_symbol,
-            "interval": fallback_interval,
+            "interval": interval,
             "limit": safe_limit,
             "candles": candles,
-            "source": market_data.SYMBOLS[clean_symbol]["source"],
+            "source": "SIMULATED_FALLBACK",
             "provenance": "SPEED_LAYER",
-            "watermark": "event-time · 2s",
+            "watermark": "SIMULATED FALLBACK",
             "cutoff_time": candles[-1]["timestamp"],
+            "is_live": False,
+            "fetched_at": _iso(datetime.now(timezone.utc)),
+            "error": exchange_error,
+        }
+
+    def _metrics_from_candles(
+        self,
+        clean_symbol: str,
+        window: str,
+        candles: List[Dict[str, Any]],
+        source: str,
+        is_live: bool,
+        fetched_at: str,
+    ) -> Dict[str, Any]:
+        if len(candles) < 2:
+            raise ValueError("no hay suficientes velas para calcular m?tricas")
+        closes = [float(candle["close"]) for candle in candles]
+        volumes = [float(candle["volume"]) for candle in candles]
+        first_open = float(candles[0]["open"])
+        last_close = closes[-1]
+        notional = sum(
+            ((float(candle["high"]) + float(candle["low"]) + float(candle["close"])) / 3)
+            * float(candle["volume"])
+            for candle in candles
+        )
+        volume_base = sum(volumes) or 1.0
+        vwap = notional / volume_base
+        mean = sum(closes) / len(closes)
+        variance = sum((close - mean) ** 2 for close in closes) / len(closes)
+        return {
+            "symbol": clean_symbol,
+            "window": window,
+            "current_price": round(last_close, 8),
+            "return_24h": round(((last_close - first_open) / first_open * 100) if first_open else 0.0, 4),
+            "volume_24h": round(notional, 2),
+            "volume_base": round(volume_base, 8),
+            "vwap": round(vwap, 8),
+            "price_variance": round(variance, 8),
+            "open": round(first_open, 8),
+            "high": round(max(float(candle["high"]) for candle in candles), 8),
+            "low": round(min(float(candle["low"]) for candle in candles), 8),
+            "source": source,
+            "provenance": "SPEED_LAYER",
+            "cutoff_time": candles[-1]["timestamp"],
+            "freshness_seconds": 0.8,
+            "is_live": is_live,
+            "fetched_at": fetched_at,
         }
 
     def get_market_metrics(self, symbol: str, window: str = "24h") -> Dict[str, Any]:
         clean_symbol = sanitize_symbol(symbol)
-        if not self._postgres_available():
-            return market_data.compute_metrics(clean_symbol, window=window)
-        try:
-            payload = self.get_ohlcv(clean_symbol, interval="1h", limit=24)
-            rows = payload.get("data", []) if isinstance(payload, dict) else []
-            if len(rows) >= 2:
-                closes = [float(row.get("close_price", 0)) for row in rows]
-                volumes = [float(row.get("volume", 0)) for row in rows]
-                first_open = float(rows[0].get("open_price", 0))
-                last_close = closes[-1]
-                notional = sum(
-                    ((float(row.get("high_price", 0)) + float(row.get("low_price", 0)) + float(row.get("close_price", 0))) / 3)
-                    * float(row.get("volume", 0))
-                    for row in rows
-                )
-                volume_base = sum(volumes) or 1.0
-                vwap = notional / volume_base
-                mean = sum(closes) / len(closes)
-                variance = sum((close - mean) ** 2 for close in closes) / len(closes)
-                return {
-                    "symbol": clean_symbol,
-                    "window": window,
-                    "current_price": round(last_close, 8),
-                    "return_24h": round(((last_close - first_open) / first_open * 100) if first_open else 0.0, 4),
-                    "volume_24h": round(notional, 2),
-                    "volume_base": round(volume_base, 8),
-                    "vwap": round(vwap, 8),
-                    "price_variance": round(variance, 8),
-                    "open": round(first_open, 8),
-                    "high": round(max(float(row.get("high_price", 0)) for row in rows), 8),
-                    "low": round(min(float(row.get("low_price", 0)) for row in rows), 8),
-                    "source": "serving.ohlcv_reconciled (Postgres)",
-                    "provenance": "SPEED_LAYER",
-                    "cutoff_time": _iso(rows[-1].get("bucket_start")),
-                    "freshness_seconds": 0.8,
-                }
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("get_market_metrics fallback: %s", exc)
 
-        return market_data.compute_metrics(clean_symbol, window=window)
+        # 1) Real serving table.
+        if self._postgres_available():
+            try:
+                payload = self.get_ohlcv(clean_symbol, interval="1h", limit=24)
+                rows = payload.get("data", []) if isinstance(payload, dict) else []
+                candles = [
+                    {
+                        "timestamp": _iso(row.get("bucket_start")),
+                        "open": float(row.get("open_price", 0)),
+                        "high": float(row.get("high_price", 0)),
+                        "low": float(row.get("low_price", 0)),
+                        "close": float(row.get("close_price", 0)),
+                        "volume": float(row.get("volume", 0)),
+                    }
+                    for row in rows
+                ]
+                return self._metrics_from_candles(
+                    clean_symbol,
+                    window,
+                    candles,
+                    "serving.ohlcv_reconciled (Postgres)",
+                    True,
+                    _iso(datetime.now(timezone.utc)),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("get_market_metrics Postgres fallback: %s", exc)
+
+        # 2) Real Binance data.
+        try:
+            live = exchange_client.fetch_klines(clean_symbol, "1h", 24)
+            return self._metrics_from_candles(
+                clean_symbol,
+                window,
+                live["candles"],
+                "Binance Public REST",
+                True,
+                live["fetched_at"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_market_metrics Binance fallback: %s", exc)
+            exchange_error = str(exc)
+
+        # 3) Synthetic fallback, explicitly marked.
+        payload = market_data.compute_metrics(clean_symbol, window=window)
+        payload.update(
+            {
+                "source": "SIMULATED_FALLBACK",
+                "is_live": False,
+                "fetched_at": _iso(datetime.now(timezone.utc)),
+                "error": exchange_error,
+            }
+        )
+        return payload
+
+    def get_market_overview(self) -> Dict[str, Any]:
+        symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+        try:
+            return exchange_client.fetch_overview(symbols)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_market_overview Binance fallback: %s", exc)
+            now = _iso(datetime.now(timezone.utc))
+            return {
+                "assets": [
+                    {
+                        "symbol": symbol,
+                        "base": symbol.replace("USDT", ""),
+                        "quote": "USDT",
+                        "exchange": "Binance",
+                        "price": 0.0,
+                        "change_24h": 0.0,
+                        "volume_24h": 0.0,
+                        "sparkline": [],
+                        "source": "unavailable",
+                        "is_live": False,
+                        "fetched_at": now,
+                        "error": str(exc),
+                    }
+                    for symbol in symbols
+                ],
+                "source": "unavailable",
+                "is_live": False,
+                "fetched_at": now,
+                "errors": [str(exc)],
+            }
+
+    def get_market_orderbook(self, symbol: str, limit: int = 20) -> Dict[str, Any]:
+        clean_symbol = sanitize_symbol(symbol)
+        return exchange_client.fetch_depth(clean_symbol, limit)
+
+    def get_market_trades(self, symbol: str, limit: int = 50) -> Dict[str, Any]:
+        clean_symbol = sanitize_symbol(symbol)
+        return exchange_client.fetch_trades(clean_symbol, limit)
 
     def get_market_pipeline_status(self) -> Dict[str, Any]:
         base = market_data.pipeline_status()

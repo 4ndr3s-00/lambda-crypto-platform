@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import type {
   ArbitrageQuote,
@@ -9,18 +9,12 @@ import type {
   ExecutionTrade,
   LiquidationEvent,
   OHLCVCandle,
+  OHLCVResponse,
   OnChainSnapshot,
   OrderBookSnapshot,
 } from "@/lib/types";
 import { DASHBOARD_INTERVALS, mockApi } from "@/lib/mockData";
-import {
-  ASSET_PROFILES,
-  createArbitrage,
-  createLiquidations,
-  createOnChain,
-  createOrderBook,
-  createTrades,
-} from "@/lib/streamMock";
+import { createArbitrage, createLiquidations, createOnChain } from "@/lib/streamMock";
 import { cn, formatCompact, formatPercent, formatUsd } from "@/lib/utils";
 import { StreamingChart } from "./StreamingChart";
 import { OrderBookPanel } from "./OrderBookPanel";
@@ -40,106 +34,98 @@ function symbolSeed(symbol: string): number {
 
 export function AssetDeepDive({ symbol, interval, onIntervalChange, onBack }: AssetDeepDiveProps) {
   const seed = useMemo(() => symbolSeed(symbol), [symbol]);
-  const profile = ASSET_PROFILES[symbol];
-  const [candles, setCandles] = useState<OHLCVCandle[]>([]);
+  const [series, setSeries] = useState<OHLCVResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [price, setPrice] = useState(profile.basePrice);
-  const [orderBook, setOrderBook] = useState<OrderBookSnapshot>(() =>
-    createOrderBook(symbol, profile.basePrice, seed),
-  );
-  const [trades, setTrades] = useState<ExecutionTrade[]>(() =>
-    createTrades(symbol, profile.basePrice, seed, 48),
-  );
+  const [seriesError, setSeriesError] = useState<string | null>(null);
+  const [orderBook, setOrderBook] = useState<OrderBookSnapshot | null>(null);
+  const [orderBookError, setOrderBookError] = useState<string | null>(null);
+  const [trades, setTrades] = useState<ExecutionTrade[]>([]);
+  const [tradesSource, setTradesSource] = useState<string>("—");
   const [arbitrage, setArbitrage] = useState<ArbitrageQuote[]>(() =>
-    createArbitrage(profile.basePrice, seed),
+    createArbitrage(1, seed),
   );
   const [liquidations, setLiquidations] = useState<LiquidationEvent[]>(() =>
-    createLiquidations(symbol, profile.basePrice, seed),
+    createLiquidations(symbol, 1, seed),
   );
   const [onChain, setOnChain] = useState<OnChainSnapshot>(() => createOnChain(seed));
-  const priceRef = useRef(price);
-  priceRef.current = price;
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    setCandles([]);
+    setSeriesError(null);
 
-    void mockApi
-      .getOHLCV({ symbol, interval, limit: 96 })
-      .then((series) => {
+    const load = async () => {
+      try {
+        const next = await mockApi.getOHLCV({ symbol, interval, limit: 96 });
         if (cancelled) return;
-        setCandles(series.candles);
-        const last = series.candles[series.candles.length - 1];
-        if (last) {
-          setPrice(last.close);
-          priceRef.current = last.close;
-        }
+        setSeries(next);
+        setSeriesError(next.isLive ? null : next.error ?? "datos simulados");
         setLoading(false);
-      })
-      .catch(() => {
-        if (!cancelled) setLoading(false);
-      });
+      } catch (error) {
+        if (cancelled) return;
+        setSeriesError(error instanceof Error ? error.message : "sin datos");
+        setLoading(false);
+      }
+    };
 
+    void load();
+    const id = window.setInterval(load, 5000);
     return () => {
       cancelled = true;
+      window.clearInterval(id);
     };
   }, [symbol, interval]);
 
   useEffect(() => {
-    let frame = 0;
-    const id = window.setInterval(() => {
-      const now = Date.now();
-      const drift = (Math.random() - 0.5) * profile.volatility * 0.7;
-      const nextPrice = Math.max(priceRef.current * (1 + drift), 0.01);
-      priceRef.current = nextPrice;
-      setPrice(nextPrice);
+    let cancelled = false;
 
-      if (frame % 2 === 0) {
-        setOrderBook(createOrderBook(symbol, nextPrice, now));
-        setTrades((previous) => [...createTrades(symbol, nextPrice, now, 2), ...previous].slice(0, 80));
+    const load = async () => {
+      try {
+        const [book, tape] = await Promise.all([
+          mockApi.getOrderBook(symbol, 20),
+          mockApi.getTrades(symbol, 60),
+        ]);
+        if (cancelled) return;
+        setOrderBook(book);
+        setOrderBookError(null);
+        setTrades(tape.trades);
+        setTradesSource(tape.source);
+      } catch (error) {
+        if (cancelled) return;
+        setOrderBookError(error instanceof Error ? error.message : "sin datos");
       }
-      if (frame % 8 === 0) setArbitrage(createArbitrage(nextPrice, now));
-      if (frame % 12 === 0) {
-        setLiquidations((previous) => [
-          ...createLiquidations(symbol, nextPrice, now).slice(0, 2),
-          ...previous,
-        ].slice(0, 12));
-      }
-      if (frame % 20 === 0) setOnChain(createOnChain(now));
-      frame += 1;
-    }, 250);
+    };
 
-    return () => window.clearInterval(id);
-  }, [profile.volatility, symbol]);
+    void load();
+    const id = window.setInterval(load, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [symbol]);
 
   useEffect(() => {
-    if (candles.length === 0) return;
     const id = window.setInterval(() => {
-      setCandles((previous) => {
-        if (previous.length === 0) return previous;
-        const last = previous[previous.length - 1]!;
-        const close = priceRef.current;
-        return [
-          ...previous.slice(0, -1),
-          {
-            ...last,
-            close,
-            high: Math.max(last.high, close),
-            low: Math.min(last.low, close),
-            volume: last.volume * (1 + Math.random() * 0.02),
-          },
-        ];
-      });
-    }, 1000);
+      const price = series?.candles[series.candles.length - 1]?.close ?? 1;
+      setArbitrage(createArbitrage(price, Date.now()));
+      setLiquidations((previous) => [
+        ...createLiquidations(symbol, price, Date.now()).slice(0, 1),
+        ...previous,
+      ].slice(0, 12));
+      setOnChain(createOnChain(Date.now()));
+    }, 6000);
     return () => window.clearInterval(id);
-  }, [candles.length]);
+  }, [series, symbol]);
 
+  const candles: OHLCVCandle[] = series?.candles ?? [];
   const first = candles[0];
   const last = candles[candles.length - 1];
   const returnPct = first && last && first.open > 0 ? ((last.close - first.open) / first.open) * 100 : 0;
   const volume = candles.reduce((acc, candle) => acc + candle.volume * candle.close, 0);
+  const price = last?.close ?? 0;
   const up = returnPct >= 0;
+  const isLive = Boolean(series?.isLive);
+  const source = series?.source ?? "—";
 
   return (
     <motion.section
@@ -161,9 +147,21 @@ export function AssetDeepDive({ symbol, interval, onIntervalChange, onBack }: As
           <span className="font-mono text-[11px] font-medium tracking-wide text-zinc-200">
             {symbol} · WORKSPACE ANALÍTICO EN VIVO
           </span>
-          <span className={cn("rounded-full border px-2 py-0.5 font-mono text-[9px]", up ? "border-emerald-500/25 text-emerald-400" : "border-rose-500/25 text-rose-400")}>
-            {formatPercent(returnPct)}
+          <span
+            className={cn(
+              "rounded-full border px-2 py-0.5 font-mono text-[9px]",
+              isLive
+                ? "border-emerald-500/25 text-emerald-400"
+                : "border-rose-500/25 text-rose-400",
+            )}
+          >
+            {isLive ? "LIVE" : "SIMULADO"}
           </span>
+          {candles.length > 0 && (
+            <span className={cn("font-mono text-[9px]", up ? "text-emerald-400" : "text-rose-400")}>
+              {formatPercent(returnPct)}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-0.5 rounded-full border border-white/10 bg-white/[0.02] p-0.5">
@@ -184,10 +182,10 @@ export function AssetDeepDive({ symbol, interval, onIntervalChange, onBack }: As
       </div>
 
       <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <DiveMetric label="Precio" value={formatUsd(price)} />
-        <DiveMetric label="Retorno ventana" value={formatPercent(returnPct)} tone={up ? "up" : "down"} />
-        <DiveMetric label="Volumen" value={`$${formatCompact(volume)}`} />
-        <DiveMetric label="OBI" value={`${orderBook.obi >= 0 ? "+" : ""}${orderBook.obi.toFixed(1)}%`} tone={orderBook.obi >= 0 ? "up" : "down"} />
+        <DiveMetric label="Precio" value={price > 0 ? formatUsd(price) : "—"} />
+        <DiveMetric label="Retorno ventana" value={candles.length > 0 ? formatPercent(returnPct) : "—"} tone={up ? "up" : "down"} />
+        <DiveMetric label="Volumen" value={volume > 0 ? `$${formatCompact(volume)}` : "—"} />
+        <DiveMetric label="OBI real" value={orderBook ? `${orderBook.obi >= 0 ? "+" : ""}${orderBook.obi.toFixed(1)}%` : "—"} tone={orderBook && orderBook.obi >= 0 ? "up" : "down"} />
       </div>
 
       <div className="mb-3 flex h-[420px] min-h-[390px] flex-col rounded-xl border border-white/[0.08] bg-white/[0.012] p-3">
@@ -195,20 +193,31 @@ export function AssetDeepDive({ symbol, interval, onIntervalChange, onBack }: As
           <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-wider text-zinc-500">
             <span className="text-zinc-200">{symbol}</span>
             <span className="rounded-full border border-white/10 px-2 py-0.5">{interval}</span>
-            <span className="hidden sm:inline">OHLCV · live</span>
+            <span className={isLive ? "text-emerald-400" : "text-rose-400"}>{source}</span>
           </div>
           <span className="font-mono text-[9px] text-zinc-600">
-            {loading ? "Cargando feed…" : `${candles.length} velas · tick 1s`}
+            {loading ? "Cargando OHLCV…" : `${candles.length} velas · polling 5s`}
           </span>
         </div>
+        {seriesError && !isLive && (
+          <div className="mb-2 rounded border border-rose-500/20 bg-rose-500/[0.06] px-2 py-1 font-mono text-[9px] text-rose-300">
+            Binance no respondió: {seriesError}. Se muestra el fallback simulado marcado.
+          </div>
+        )}
         <div className="min-h-0 flex-1">
           <StreamingChart candles={candles} interval={interval} live />
         </div>
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
-        <OrderBookPanel snapshot={orderBook} />
-        <ExecutionTape trades={trades} />
+        {orderBook ? (
+          <OrderBookPanel snapshot={orderBook} />
+        ) : (
+          <div className="rounded-xl border border-white/10 bg-zinc-950/70 p-4 font-mono text-[10px] text-zinc-500">
+            Order Book: {orderBookError ?? "consultando Binance…"}
+          </div>
+        )}
+        <ExecutionTape trades={trades} source={tradesSource} />
         <ArbitrageMatrix quotes={arbitrage} />
         <LiquidationRadar events={liquidations} />
         <div className="lg:col-span-2">

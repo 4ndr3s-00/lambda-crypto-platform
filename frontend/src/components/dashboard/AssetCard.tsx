@@ -11,6 +11,9 @@ interface AssetCardProps {
 }
 
 function Sparkline({ values, positive }: { values: number[]; positive: boolean }) {
+  if (values.length < 2) {
+    return <div className="h-10 w-full rounded bg-white/[0.02]" />;
+  }
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || 1;
@@ -39,6 +42,8 @@ function Sparkline({ values, positive }: { values: number[]; positive: boolean }
 
 export const AssetCard = memo(function AssetCard({ asset, onSelect }: AssetCardProps) {
   const up = asset.change24h >= 0;
+  const hasPrice = asset.isLive && asset.price > 0;
+
   return (
     <motion.button
       type="button"
@@ -59,31 +64,36 @@ export const AssetCard = memo(function AssetCard({ asset, onSelect }: AssetCardP
               {asset.base} / {asset.quote}
             </span>
             <span className="block truncate font-mono text-[9px] uppercase tracking-wider text-zinc-600">
-              {asset.exchange}
+              {asset.exchange} · {asset.source}
             </span>
           </div>
         </div>
         <span
           className={cn(
             "shrink-0 rounded-full border px-2 py-0.5 font-mono text-[9px] tabular-nums",
-            up
-              ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
-              : "border-rose-500/25 bg-rose-500/10 text-rose-400",
+            !hasPrice
+              ? "border-white/10 text-zinc-600"
+              : up
+                ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                : "border-rose-500/25 bg-rose-500/10 text-rose-400",
           )}
         >
-          {formatPercent(asset.change24h)}
+          {hasPrice ? formatPercent(asset.change24h) : "—"}
         </span>
       </div>
 
       <div className="mt-5">
         <motion.span
-          key={asset.price}
+          key={hasPrice ? asset.price : "unavailable"}
           initial={{ opacity: 0.55, y: -1 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.18 }}
-          className="block font-mono text-[26px] font-medium tracking-[-0.04em] text-zinc-100 tabular-nums"
+          className={cn(
+            "block font-mono text-[26px] font-medium tracking-[-0.04em] tabular-nums",
+            hasPrice ? "text-zinc-100" : "text-zinc-600",
+          )}
         >
-          {formatUsd(asset.price)}
+          {hasPrice ? formatUsd(asset.price) : "—"}
         </motion.span>
         <div className="mt-1">
           <Sparkline values={asset.sparkline} positive={up} />
@@ -94,21 +104,22 @@ export const AssetCard = memo(function AssetCard({ asset, onSelect }: AssetCardP
         <div>
           <span className="block font-mono text-[8px] uppercase tracking-wider text-zinc-600">Vol 24h</span>
           <span className="mt-0.5 block truncate font-mono text-[10px] text-zinc-300">
-            ${formatCompact(asset.volume24h)}
+            {hasPrice ? `$${formatCompact(asset.volume24h)}` : "—"}
           </span>
         </div>
         <div>
-          <span className="block font-mono text-[8px] uppercase tracking-wider text-zinc-600">Funding</span>
-          <span className={cn("mt-0.5 block font-mono text-[10px] tabular-nums", asset.funding >= 0 ? "text-emerald-400" : "text-rose-400")}>
-            {asset.funding >= 0 ? "+" : ""}
-            {asset.funding.toFixed(4)}%
-          </span>
+          <span className="block font-mono text-[8px] uppercase tracking-wider text-zinc-600">Exchange</span>
+          <span className="mt-0.5 block truncate font-mono text-[10px] text-zinc-300">{asset.exchange}</span>
         </div>
         <div>
-          <span className="block font-mono text-[8px] uppercase tracking-wider text-zinc-600">OBI</span>
-          <span className={cn("mt-0.5 block font-mono text-[10px] tabular-nums", asset.obi >= 0 ? "text-emerald-400" : "text-rose-400")}>
-            {asset.obi >= 0 ? "+" : ""}
-            {asset.obi.toFixed(0)}%
+          <span className="block font-mono text-[8px] uppercase tracking-wider text-zinc-600">Estado</span>
+          <span
+            className={cn(
+              "mt-0.5 block font-mono text-[10px]",
+              asset.isLive ? "text-emerald-400" : "text-rose-400",
+            )}
+          >
+            {asset.isLive ? "LIVE" : "SIN DATOS"}
           </span>
         </div>
       </div>
