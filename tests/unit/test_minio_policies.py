@@ -158,3 +158,48 @@ def test_init_buckets_script_executable_and_valid():
 
     # Verificación Anti-Medallion en el script
     assert "bronze" in content and "silver" in content and "gold" in content
+
+
+def _spark_quarantine_actions(policy_text: str) -> list:
+    """Devuelve las acciones del statement que cubre `market-quarantine/*`."""
+    for stmt in json.loads(policy_text)["Statement"]:
+        res = stmt.get("Resource")
+        resources = res if isinstance(res, list) else [res]
+        if "arn:aws:s3:::market-quarantine/*" in resources:
+            actions = stmt.get("Action")
+            return actions if isinstance(actions, list) else [actions]
+    raise AssertionError("No se encontró un statement que cubra market-quarantine/*")
+
+
+def _init_heredoc(script_text: str, filename: str) -> str:
+    """Extrae el JSON que `init-buckets.sh` escribe vía `cat << 'EOF'`."""
+    marker = f'cat << \'EOF\' > "${{TMP_POLICIES_DIR}}/{filename}"'
+    start = script_text.index(marker) + len(marker)
+    end = script_text.index("\nEOF", start)
+    return script_text[start:end].lstrip("\n")
+
+
+def test_spark_dlq_concede_get_object_a_ambas_definiciones():
+    """
+    Regresión: S3A ejecuta `getFileStatus` (HEAD) sobre el directorio de destino
+    antes de escribir en la DLQ. MinIO responde 403 —y no 404— cuando el rol no
+    tiene `s3:GetObject`, de modo que el job abortaba con AccessDeniedException
+    en `market-quarantine/date=...`.
+
+    La política de Spark existe en dos sitios (el JSON montado en `/policies` y
+    el heredoc que `init-buckets.sh` envía a `mc admin policy`); ambos deben
+    otorgar el permiso, o `make up` revierte el fix silenciosamente.
+    """
+    json_path = POLICIES_DIR / "spark-policy.json"
+    heredoc = _init_heredoc(INIT_SCRIPT.read_text(), "spark-policy.json")
+
+    for origen, policy_text in (("spark-policy.json", json_path.read_text()),
+                                ("init-buckets.sh", heredoc)):
+        actions = _spark_quarantine_actions(policy_text)
+        assert "s3:GetObject" in actions, (
+            f"{origen} no concede s3:GetObject sobre market-quarantine/*: "
+            f"S3A necesita el HEAD previo a la escritura de la DLQ."
+        )
+        assert "s3:PutObject" in actions, (
+            f"{origen} debe conservar la escritura de la DLQ."
+        )

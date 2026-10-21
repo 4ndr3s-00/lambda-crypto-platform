@@ -173,6 +173,7 @@ cat << 'EOF' > "${TMP_POLICIES_DIR}/spark-policy.json"
       "Sid": "AllowSparkDLQQuarantineWrite",
       "Effect": "Allow",
       "Action": [
+        "s3:GetObject",
         "s3:PutObject",
         "s3:AbortMultipartUpload"
       ],

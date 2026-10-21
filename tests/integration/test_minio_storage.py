@@ -165,7 +165,9 @@ class IAMPolicySimulator:
             if bucket == "market-checkpoints":
                 return True
             if bucket == "market-quarantine":
-                return action in ["s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation"]
+                # Incluye GetObject: S3A hace HEAD del directorio antes de
+                # escribir, y MinIO devuelve 403 en lugar de 404 sin ese permiso.
+                return action in ["s3:GetObject", "s3:PutObject", "s3:ListBucket", "s3:GetBucketLocation"]
             if bucket == "market-lake":
                 if key.startswith("batch-results/"):
                     return True
@@ -191,7 +193,7 @@ def test_bdd_criterio_3_iam_least_privilege_isolation():
     """
     Criterio 3 (BDD): Valida el aislamiento y mínimo privilegio de los 3 componentes:
     - FastAPI: Read-Only en market-lake/batch-results/*, denegado en checkpoints y quarantine.
-    - Spark: Full en checkpoints, write en DLQ quarantine, write en batch-results.
+    - Spark: Full en checkpoints, read+write en DLQ quarantine, write en batch-results.
     - Airflow: Full en market-lake, read en quarantine, bloqueado en checkpoints.
     """
     sim = IAMPolicySimulator()
@@ -210,6 +212,7 @@ def test_bdd_criterio_3_iam_least_privilege_isolation():
     # 2. Apache Spark
     assert sim.is_action_allowed("spark_service", "s3:PutObject", "market-checkpoints", "spark/query=stream/0")
     assert sim.is_action_allowed("spark_service", "s3:PutObject", "market-quarantine", "source=binance/corrupt.json")
+    assert sim.is_action_allowed("spark_service", "s3:GetObject", "market-quarantine", "date=2026-10-19")
     assert sim.is_action_allowed("spark_service", "s3:PutObject", "market-lake", "batch-results/metric=ohlcv/agg.parquet")
     assert sim.is_action_allowed("spark_service", "s3:GetObject", "market-lake", "historical/source=binance/raw.json")
     # Prohibido: Escribir históricos directamente (Airflow los ingesta)
