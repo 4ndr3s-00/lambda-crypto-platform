@@ -73,6 +73,7 @@ ollama-models/
 # RAG generated index
 metadata/rag_index.json
 metadata/rag_index.chroma/
+metadata/router_embeddings.json
 .pytest_cache/
 
 

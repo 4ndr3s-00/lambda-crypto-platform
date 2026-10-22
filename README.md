@@ -353,26 +353,45 @@ Este proyecto está bajo la Licencia MIT. Consulta el archivo [LICENSE](LICENSE)
 
 ---
 
-## 10. IA local Qwen2.5, RAG y guardrails (US-28 / US-29 / US-30)
+## 10. IA: router semántico local + Groq + RAG
 
-La capa de IA vive en `api/` y tiene dos modos:
+La capa de IA vive en `api/` y usa dos proveedores con roles separados:
 
-1. **Con Ollama** (`make up-all`): Qwen2.5 con function calling sobre herramientas de solo lectura.
-2. **Sin Ollama**: fallback determinista con las mismas herramientas, para que el dashboard y el chat funcionen sin GPU.
+1. **Router local (Ollama `bge-m3`):** embeddings multilingües para clasificar saludos, identidad, despedidas, agradecimientos y preguntas fuera de alcance. Esas respuestas se devuelven sin llamar a Groq ni a la base de datos.
+2. **Groq (API externa):** solo se activa para consultas analíticas reales. Usa el system prompt oficial de IQ Analyzer, el contexto RAG y las herramientas de solo lectura para obtener cifras reales.
 
 | Archivo | Responsabilidad |
 | :--- | :--- |
+| `api/semantic_router.py` | Router de intenciones con embeddings `bge-m3`, umbral configurable y respuestas predeterminadas ES/EN. |
+| `api/llm_service.py` | Orquestación Groq, tool calls, RAG, fallback determinista y guardrail de dominio. |
 | `api/rag_indexer.py` | Indexa README, `metadata/docs/`, `metadata/catalog.json` y `metadata/glossary.json`. ChromaDB opcional; TF-IDF local si no está instalado. |
-| `api/llm_service.py` | Prompt + contexto RAG + tool calls de Ollama + fallback. |
 | `api/sql_guardrails.py` | SELECT-only, allowlist, `LIMIT <= 100`, timeout 5s, bloqueo de DDL/EXEC/funciones peligrosas. |
 | `api/tools.py` | Solo `get_catalog_metadata`, `query_metrics`, `query_timeseries`. Sin shell ni SQL libre. |
 
+Variables relevantes:
+
 ```bash
-make rag-index                 # reconstruye metadata/rag_index.json
-make up-all                    # Ollama + ollama-init (pull del modelo)
-pip install -r api/requirements-llm.txt   # ChromaDB opcional
-make test                      # 59 tests
+OLLAMA_EMBEDDING_MODEL=bge-m3
+SEMANTIC_ROUTER_ENABLED=true
+SEMANTIC_ROUTER_THRESHOLD=0.72
+GROQ_API_KEY=...                 # solo en .env, nunca en git
+GROQ_MODEL=openai/gpt-oss-120b
+GROQ_BASE_URL=https://api.groq.com/openai/v1
 ```
+
+`ollama-init` descarga Qwen2.5 y `bge-m3` al levantar el stack. Verificación:
+
+```bash
+curl http://localhost:8000/api/ai/status
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Hola, ¿cómo estás?","symbol":"BTCUSDT","interval":"15m"}'
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"¿Cuál es el precio de BTC y su retorno en 24h?","symbol":"BTCUSDT","interval":"15m"}'
+```
+
+La primera consulta responde por router local (`source=semantic_router`, sin tool calls). La segunda activa Groq y ejecuta `query_metrics`, devolviendo cifras reales y `sql` de trazabilidad.
 
 ## 11. Dashboard V7 · IQ Analyzer & Crypto Streaming Suite
 

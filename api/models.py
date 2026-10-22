@@ -236,4 +236,6 @@ class ChatResponse(BaseModel):
     disclaimer: str
     tool_calls: list[ToolCallRecord] = Field(default_factory=list)
     rag_used: bool = False
+    intent: str | None = None
+    router_score: float | None = None
     latency_ms: float

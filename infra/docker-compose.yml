@@ -377,6 +377,14 @@
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b-instruct}
       OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-60}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-bge-m3}
+      SEMANTIC_ROUTER_ENABLED: ${SEMANTIC_ROUTER_ENABLED:-true}
+      SEMANTIC_ROUTER_THRESHOLD: ${SEMANTIC_ROUTER_THRESHOLD:-0.72}
+      SEMANTIC_ROUTER_CACHE_PATH: ${SEMANTIC_ROUTER_CACHE_PATH:-/app/metadata/router_embeddings.json}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_BASE_URL: ${GROQ_BASE_URL:-https://api.groq.com/openai/v1}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      GROQ_TIMEOUT_SECONDS: ${GROQ_TIMEOUT_SECONDS:-30}
       FRONTEND_DIR: /app/static
       STATIC_DIR: /app/static
       RAG_INDEX_PATH: /app/metadata/rag_index.json
@@ -428,7 +436,10 @@
         condition: service_healthy
     environment:
       OLLAMA_HOST: http://ollama:11434
-    entrypoint: ["/bin/sh", "-c", "ollama pull ${OLLAMA_MODEL:-qwen2.5:3b-instruct}"]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "ollama pull ${OLLAMA_MODEL:-qwen2.5:3b-instruct} && ollama pull ${OLLAMA_EMBEDDING_MODEL:-bge-m3}"
     restart: "no"
     networks:
       - lambda-net
