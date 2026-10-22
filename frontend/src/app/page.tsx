@@ -34,7 +34,7 @@ const TRACK_SPRING = {
 
 export default function Home() {
   const [view, setView] = useState<ViewMode>("CHAT_CONSOLE");
-  const [interval, setInterval] = useState<DashboardInterval>("15m");
+  const [interval, setInterval] = useState<DashboardInterval>("1d");
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
