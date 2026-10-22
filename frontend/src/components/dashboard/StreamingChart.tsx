@@ -84,7 +84,7 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [cursor, setCursor] = useState<CursorPoint | null>(null);
   const autoScrolled = useRef(false);
-  const minCandleWidth = interval === "1d" ? 12 : 7;
+  const minCandleWidth = interval === "1d" ? 20 : 7;
   const contentWidth = Math.max(size.w, candles.length * minCandleWidth);
 
   useEffect(() => {
@@ -191,7 +191,7 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
   }, [cursor]);
 
   return (
-    <div ref={wrapRef} className="relative h-full w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
+    <div ref={wrapRef} className="relative h-full w-full overflow-x-auto overscroll-x-contain pb-2 [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-track]:bg-transparent">
       {size.w > 0 && size.h > 0 && (
         <svg
           width={contentWidth}
