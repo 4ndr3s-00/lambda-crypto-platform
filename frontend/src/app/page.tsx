@@ -103,25 +103,30 @@ export default function Home() {
     setMessages((prev) => [...prev, userMessage]);
 
     const token = generationRef.current;
-    const thinkMs = 620 + Math.random() * 540;
 
-    const timer = window.setTimeout(() => {
-      void mockApi
-        .postChat({ query })
-        .then(({ message }) => {
-          if (generationRef.current !== token) return;
-          setMessages((prev) => [...prev, message]);
-          setIsGenerating(false);
-          generatingRef.current = false;
-        })
-        .catch(() => {
-          if (generationRef.current !== token) return;
-          setIsGenerating(false);
-          generatingRef.current = false;
-        });
-    }, thinkMs);
-
-    timersRef.current.push(timer);
+    void mockApi
+      .postChat({ query })
+      .then(({ message }) => {
+        if (generationRef.current !== token) return;
+        setMessages((prev) => [...prev, message]);
+        setIsGenerating(false);
+        generatingRef.current = false;
+      })
+      .catch((error: unknown) => {
+        if (generationRef.current !== token) return;
+        const detail = error instanceof Error ? error.message : "el asistente no está disponible";
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg_error_${Date.now()}`,
+            role: "assistant",
+            timestamp: new Date().toISOString(),
+            content: `No se pudo consultar el asistente: ${detail}`,
+          },
+        ]);
+        setIsGenerating(false);
+        generatingRef.current = false;
+      });
   }, []);
 
   const handleConsoleSubmit = useCallback(() => {

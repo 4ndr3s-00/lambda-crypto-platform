@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { ExecutionTrade } from "@/lib/types";
-import { cn, formatCompact, formatNumber } from "@/lib/utils";
+import { cn, formatCompact, formatNumber, toBogota } from "@/lib/utils";
 import { Panel } from "./Panel";
 
 interface ExecutionTapeProps {
@@ -11,7 +11,7 @@ interface ExecutionTapeProps {
 }
 
 function tradeClock(iso: string): string {
-  const date = new Date(iso);
+  const date = toBogota(new Date(iso));
   const base = date.toISOString().slice(11, 19);
   return `${base}.${String(date.getUTCMilliseconds()).padStart(3, "0")}`;
 }

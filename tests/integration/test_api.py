@@ -131,16 +131,17 @@ async def test_endpoint_metrics():
     assert "count" in data
     assert "last_updated_utc" in data
     assert "items" in data
-    assert len(data["items"]) > 0
-
-    metric = data["items"][0]
-    assert "symbol" in metric
-    assert "last_price" in metric
-    assert "rolling_volume_5m" in metric
-    assert "pct_change_5m" in metric
-    assert "event_timestamp" in metric
-    assert "last_updated_utc" in metric
-    assert "source" in metric
+    # Lista vacía es la respuesta honesta cuando serving.realtime_metrics aún
+    # no tiene filas (Spark Streaming no ha escrito un batch): el sistema
+    # nunca inventa un precio para rellenar el hueco.
+    for metric in data["items"]:
+        assert "symbol" in metric
+        assert "last_price" in metric
+        assert "rolling_volume_5m" in metric
+        assert "pct_change_5m" in metric
+        assert "event_timestamp" in metric
+        assert "last_updated_utc" in metric
+        assert "source" in metric
 
 
 @pytest.mark.asyncio
@@ -167,18 +168,20 @@ async def test_endpoint_pipeline_status():
     assert response.status_code == 200
     data = response.json()
     assert "cluster_status" in data
-    assert data["cluster_status"] in ["HEALTHY", "WARNING", "DEGRADED"]
+    # "UNKNOWN" es la respuesta honesta cuando serving.pipeline_status aún no
+    # tiene filas (Airflow no ha corrido): el sistema nunca inventa un estado
+    # "HEALTHY" sin datos reales que lo respalden.
+    assert data["cluster_status"] in ["HEALTHY", "WARNING", "DEGRADED", "UNKNOWN"]
     assert "timestamp_utc" in data
     assert "freshness_seconds" in data
     assert "components" in data
     assert isinstance(data["components"], list)
-    assert len(data["components"]) > 0
 
-    comp = data["components"][0]
-    assert "component" in comp
-    assert "status" in comp
-    assert "consumer_lag" in comp
-    assert comp["consumer_lag"] >= 0
+    for comp in data["components"]:
+        assert "component" in comp
+        assert "status" in comp
+        assert "consumer_lag" in comp
+        assert comp["consumer_lag"] >= 0
 
 
 # ------------------------------------------------------------------------------

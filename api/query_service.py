@@ -192,20 +192,7 @@ class QueryService:
                     }
         except Exception as e:
             logger.error(f"Error consultando activos en base de datos: {e}")
-            # Fallback en caso de base de datos en inicialización
-            mock_items = [
-                {"symbol": "BTCUSDT", "name": "Bitcoin / Tether", "exchange": "binance", "base_asset": "BTC", "quote_asset": "USDT", "status": "ACTIVE", "is_active": True, "created_at": datetime.now(timezone.utc)},
-                {"symbol": "ETHUSDT", "name": "Ethereum / Tether", "exchange": "binance", "base_asset": "ETH", "quote_asset": "USDT", "status": "ACTIVE", "is_active": True, "created_at": datetime.now(timezone.utc)},
-                {"symbol": "SOLUSDT", "name": "Solana / Tether", "exchange": "binance", "base_asset": "SOL", "quote_asset": "USDT", "status": "ACTIVE", "is_active": True, "created_at": datetime.now(timezone.utc)}
-            ]
-            if exchange:
-                mock_items = [i for i in mock_items if i["exchange"] == exchange.lower()]
-            return {
-                "total": len(mock_items),
-                "page": 1,
-                "page_size": limit,
-                "items": mock_items
-            }
+            raise QueryServiceError(f"no se pudo consultar serving.dim_assets: {e}") from e
 
     def get_ohlcv(
         self,
@@ -275,28 +262,11 @@ class QueryService:
                 "data": []
             }
 
-    def _fallback_metrics(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
-        target = sanitize_symbol(symbol) if symbol else "BTCUSDT"
-        now = datetime.now(timezone.utc)
-        return [
-            {
-                "symbol": target,
-                "last_price": 68500.0 if target == "BTCUSDT" else 0.0,
-                "rolling_volume_5m": 125.45,
-                "pct_change_5m": 1.25,
-                "event_timestamp": now,
-                "ingestion_timestamp": now,
-                "last_updated_utc": now,
-                "source": "SIMULATED_FALLBACK",
-                "data_source": "synthetic_fallback",
-            }
-        ]
-
     def get_metrics(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         """
-        Consulta las métricas operativas recientes (Speed Layer) y retornos.
-        Si la tabla está vacía, devuelve un snapshot determinista para que el
-        dashboard y los tests funcionen antes de que Spark escriba el primer batch.
+        Consulta las métricas operativas recientes (Speed Layer).
+        Si la tabla está vacía (Spark aún no escribió un batch) devuelve una
+        lista vacía honesta: nunca se inventa un precio ni una métrica.
         """
         where_sql = "WHERE symbol = %s" if symbol else ""
         params = [sanitize_symbol(symbol)] if symbol else []
@@ -323,25 +293,15 @@ class QueryService:
                         item["source"] = "Speed Layer (Spark Structured Streaming)"
                         items.append(item)
 
-                    is_real = bool(items)
-                    if not is_real:
-                        items = self._fallback_metrics(symbol)
-
                     return {
                         "count": len(items),
                         "last_updated_utc": datetime.now(timezone.utc),
                         "items": items,
-                        "data_source": "postgres_reconciled" if is_real else "synthetic_fallback",
+                        "data_source": "postgres_reconciled" if items else "no_data_available",
                     }
         except Exception as e:
-            logger.warning("Error consultando métricas en Postgres: %s", e)
-            items = self._fallback_metrics(symbol)
-            return {
-                "count": len(items),
-                "last_updated_utc": datetime.now(timezone.utc),
-                "items": items,
-                "data_source": "synthetic_fallback",
-            }
+            logger.error("Error consultando métricas en Postgres: %s", e)
+            raise QueryServiceError(f"no se pudo consultar serving.realtime_metrics: {e}") from e
 
     def get_pipeline_status(self) -> Dict[str, Any]:
         """
@@ -373,33 +333,31 @@ class QueryService:
                         delta = datetime.now(timezone.utc) - row_fresh["latest_event"]
                         freshness_sec = max(0.0, delta.total_seconds())
         except Exception as e:
-            logger.warning(f"Error consultando pipeline_status: {e}")
+            logger.error(f"Error consultando pipeline_status: {e}")
+            raise QueryServiceError(f"no se pudo consultar serving.pipeline_status: {e}") from e
 
         has_persisted_components = bool(components)
-        if not components:
-            now = datetime.now(timezone.utc)
-            components = [
-                {"component": "kafka_ingestion", "last_run": now, "status": "SUCCESS", "consumer_lag": 0, "metrics_summary": {"eps": 1500}, "updated_at": now},
-                {"component": "spark_streaming_speed", "last_run": now, "status": "SUCCESS", "consumer_lag": 5, "metrics_summary": {"latency_ms": 250}, "updated_at": now},
-                {"component": "spark_batch_historical", "last_run": now, "status": "SUCCESS", "consumer_lag": 0, "metrics_summary": {"partitions_written": 24}, "updated_at": now},
-                {"component": "minio_data_lake", "last_run": now, "status": "SUCCESS", "consumer_lag": 0, "metrics_summary": {"buckets_active": 3}, "updated_at": now}
-            ]
 
-        # Determinar estado global del cluster
-        cluster_status = "HEALTHY"
-        for comp in components:
-            if comp.get("status") == "FAILED":
-                cluster_status = "DEGRADED"
-                break
-            elif comp.get("consumer_lag", 0) > 1000:
-                cluster_status = "WARNING"
+        # Determinar estado global del cluster. Sin componentes persistidos
+        # no hay señal real: se marca explícitamente como desconocido en vez
+        # de inventar un estado "HEALTHY".
+        if not has_persisted_components:
+            cluster_status = "UNKNOWN"
+        else:
+            cluster_status = "HEALTHY"
+            for comp in components:
+                if comp.get("status") == "FAILED":
+                    cluster_status = "DEGRADED"
+                    break
+                elif comp.get("consumer_lag", 0) > 1000:
+                    cluster_status = "WARNING"
 
         return {
             "cluster_status": cluster_status,
             "timestamp_utc": datetime.now(timezone.utc),
-            "freshness_seconds": freshness_sec if freshness_sec is not None else 2.5,
+            "freshness_seconds": freshness_sec,
             "components": components,
-            "data_source": "postgres_reconciled" if has_persisted_components else "synthetic_fallback",
+            "data_source": "postgres_reconciled" if has_persisted_components else "no_data_available",
         }
 
     # ------------------------------------------------------------------
@@ -484,26 +442,10 @@ class QueryService:
                 "cutoff_time": live["candles"][-1]["timestamp"],
             }
         except Exception as exc:  # noqa: BLE001
-            logger.warning("get_market_ohlcv Binance fallback: %s", exc)
-            exchange_error = str(exc)
-
-        # 3) Deterministic synthetic fallback, explicitly marked so the UI
-        #    never displays invented prices as if they were live.
-        candles = market_data.generate_candles(clean_symbol, interval, safe_limit)
-        return {
-            "symbol": clean_symbol,
-            "interval": interval,
-            "limit": safe_limit,
-            "candles": candles,
-            "source": "SIMULATED_FALLBACK",
-            "provenance": "SPEED_LAYER",
-            "data_source": "synthetic_fallback",
-            "watermark": "SIMULATED FALLBACK",
-            "cutoff_time": candles[-1]["timestamp"],
-            "is_live": False,
-            "fetched_at": _iso(datetime.now(timezone.utc)),
-            "error": exchange_error,
-        }
+            logger.error("get_market_ohlcv: Postgres y Binance no disponibles: %s", exc)
+            raise exchange_client.ExchangeUnavailable(
+                f"no hay datos reales disponibles para {clean_symbol} ({interval}): {exc}"
+            ) from exc
 
     def _metrics_from_candles(
         self,
@@ -628,21 +570,10 @@ class QueryService:
                 "exchange_live",
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("get_market_metrics Binance fallback: %s", exc)
-            exchange_error = str(exc)
-
-        # 3) Synthetic fallback, explicitly marked.
-        payload = market_data.compute_metrics(clean_symbol, window=window)
-        payload.update(
-            {
-                "source": "SIMULATED_FALLBACK",
-                "data_source": "synthetic_fallback",
-                "is_live": False,
-                "fetched_at": _iso(datetime.now(timezone.utc)),
-                "error": exchange_error,
-            }
-        )
-        return payload
+            logger.error("get_market_metrics: Postgres y Binance no disponibles: %s", exc)
+            raise exchange_client.ExchangeUnavailable(
+                f"no hay datos reales disponibles para {clean_symbol} ({window}): {exc}"
+            ) from exc
 
     def get_market_overview(self) -> Dict[str, Any]:
         symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
@@ -684,35 +615,61 @@ class QueryService:
         return exchange_client.fetch_trades(clean_symbol, limit)
 
     def get_market_pipeline_status(self) -> Dict[str, Any]:
-        base = market_data.pipeline_status()
-        base["data_source"] = "synthetic_fallback"
+        """
+        Telemetría real del pipeline. Sin componentes persistidos en
+        `serving.pipeline_status` no hay señal real que mostrar: se reportan
+        estados "UNKNOWN" explícitos en vez de números inventados
+        (eps, latencia, tamaño de parquet, etc.).
+        """
+        now = datetime.now(timezone.utc)
+        base: Dict[str, Any] = {
+            "kafka": {"status": "UNKNOWN", "consumer_lag": 0, "topics": ["market.events"], "ingestion_rate": "n/a", "freshness_seconds": 0.0},
+            "spark": {"status": "UNKNOWN", "window": "n/a", "watermark": "n/a", "micro_batch_ms": 0, "late_arrivals": 0},
+            "airflow": {"status": "UNKNOWN", "dag_id": "n/a", "last_run": _iso(now), "failed_tasks": 0},
+            "minio": {"status": "UNKNOWN", "path": "s3://market-lake/", "last_sync": _iso(now), "parquet_size": "n/a"},
+            "dlq": {"status": "UNKNOWN", "rejected_events": 0},
+            "timestamp": _iso(now),
+            "freshness_seconds": 0.0,
+            "data_source": "no_data_available",
+        }
         if not self._postgres_available():
             return base
         try:
             payload = self.get_pipeline_status()
-            components = payload.get("components", []) if isinstance(payload, dict) else []
-            base["data_source"] = payload.get("data_source", "synthetic_fallback")
-            for component in components:
-                name = str(component.get("component", "")).lower()
-                status = str(component.get("status", "SUCCESS")).upper()
-                if "kafka" in name:
-                    base["kafka"]["status"] = "ACTIVE" if status == "SUCCESS" else status
-                    base["kafka"]["consumer_lag"] = int(component.get("consumer_lag", 0) or 0)
-                elif "spark" in name and "stream" in name:
-                    base["spark"]["status"] = "PROCESSING" if status == "SUCCESS" else status
-                elif "airflow" in name or "batch" in name:
-                    base["airflow"]["dag_id"] = component.get("component") or "batch_recompute"
-                    base["airflow"]["status"] = status
-                    base["airflow"]["last_run"] = _iso(component.get("last_run"))
-                elif "minio" in name:
-                    base["minio"]["status"] = "SYNCED" if status == "SUCCESS" else status
-                elif "dlq" in name:
-                    metrics = component.get("metrics_summary") or {}
-                    base["dlq"]["rejected_events"] = int(metrics.get("rejected_events", 0) or 0)
-            base["freshness_seconds"] = float(payload.get("freshness_seconds") or 0.8)
-            base["timestamp"] = _iso(payload.get("timestamp_utc"))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("get_market_pipeline_status fallback: %s", exc)
+        except QueryServiceError as exc:
+            logger.warning("get_market_pipeline_status: %s", exc)
+            return base
+
+        components = payload.get("components", []) if isinstance(payload, dict) else []
+        base["data_source"] = payload.get("data_source", "no_data_available")
+        for component in components:
+            name = str(component.get("component", "")).lower()
+            status = str(component.get("status", "")).upper() or "UNKNOWN"
+            if "kafka" in name:
+                base["kafka"]["status"] = "ACTIVE" if status == "SUCCESS" else status
+                base["kafka"]["consumer_lag"] = int(component.get("consumer_lag", 0) or 0)
+                events = (component.get("metrics_summary") or {}).get("events_last_batch")
+                if events is not None:
+                    base["kafka"]["ingestion_rate"] = f"{events} eventos/batch"
+            elif "spark" in name and "stream" in name:
+                base["spark"]["status"] = "PROCESSING" if status == "SUCCESS" else status
+                summary = component.get("metrics_summary") or {}
+                if summary.get("window_duration"):
+                    base["spark"]["window"] = str(summary["window_duration"])
+                if summary.get("watermark_delay"):
+                    base["spark"]["watermark"] = str(summary["watermark_delay"])
+            elif "airflow" in name or "batch" in name:
+                base["airflow"]["dag_id"] = component.get("component") or "batch_recompute"
+                base["airflow"]["status"] = status
+                base["airflow"]["last_run"] = _iso(component.get("last_run"))
+            elif "minio" in name:
+                base["minio"]["status"] = "SYNCED" if status == "SUCCESS" else status
+            elif "dlq" in name:
+                base["dlq"]["status"] = "CLEAN" if status == "SUCCESS" else status
+                metrics = component.get("metrics_summary") or {}
+                base["dlq"]["rejected_events"] = int(metrics.get("rejected_events_last_batch", 0) or 0)
+        base["freshness_seconds"] = float(payload.get("freshness_seconds") or 0.0)
+        base["timestamp"] = _iso(payload.get("timestamp_utc"))
         return base
 
     def get_catalog_metadata(self, dataset: str = "market_ohlcv") -> Dict[str, Any]:

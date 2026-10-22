@@ -657,6 +657,134 @@ def start_metrics_postgres_query(
     return writer.start()
 
 
+def upsert_pipeline_status(
+    pg_conn_params: dict,
+    component: str,
+    status: str,
+    consumer_lag: int,
+    metrics_summary: dict,
+) -> None:
+    """
+    Hace upsert del estado real de un componente del pipeline en
+    `serving.pipeline_status`, que es la tabla que lee el panel "Pipeline
+    Health" del dashboard (`api/query_service.get_market_pipeline_status`).
+
+    Sin este sink la tabla queda vacía y el panel reporta honestamente
+    "sin datos reales" aunque el streaming sí esté corriendo — por eso cada
+    micro-batch real (no uno sintético) actualiza su propia fila aquí.
+    """
+    import psycopg2
+    from psycopg2.extras import Json
+
+    query = """
+        INSERT INTO serving.pipeline_status (
+            component, last_run, status, consumer_lag, metrics_summary, updated_at
+        ) VALUES (%s, CURRENT_TIMESTAMP, %s, %s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (component) DO UPDATE SET
+            last_run = EXCLUDED.last_run,
+            status = EXCLUDED.status,
+            consumer_lag = EXCLUDED.consumer_lag,
+            metrics_summary = EXCLUDED.metrics_summary,
+            updated_at = CURRENT_TIMESTAMP;
+    """
+    conn = psycopg2.connect(connect_timeout=5, **pg_conn_params)
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (component, status, consumer_lag, Json(metrics_summary)))
+    finally:
+        conn.close()
+
+
+def make_speed_layer_heartbeat_sink(
+    pg_conn_params: dict,
+    window_duration: str,
+    watermark_delay: str,
+):
+    """
+    Cada micro-batch real de la Speed Layer reporta su propio tamaño a
+    `kafka_ingestion` y `spark_streaming_speed`. El conteo es el real del
+    batch (`batch_df.count()`), nunca inventado; un batch vacío sigue siendo
+    SUCCESS (la query sigue viva, solo no hubo eventos en esa ventana).
+    `window_duration`/`watermark_delay` son la configuración real con la que
+    corre este job (args del CLI), no valores de ejemplo.
+    """
+
+    def _sink(batch_df: DataFrame, batch_id: int) -> None:
+        count = batch_df.count()
+        upsert_pipeline_status(
+            pg_conn_params,
+            "kafka_ingestion",
+            "SUCCESS",
+            0,
+            {"events_last_batch": count, "batch_id": batch_id},
+        )
+        upsert_pipeline_status(
+            pg_conn_params,
+            "spark_streaming_speed",
+            "SUCCESS",
+            0,
+            {
+                "rows_aggregated_last_batch": count,
+                "batch_id": batch_id,
+                "window_duration": window_duration,
+                "watermark_delay": watermark_delay,
+            },
+        )
+
+    return _sink
+
+
+def start_speed_layer_heartbeat_query(
+    metrics_raw_df: DataFrame,
+    pg_conn_params: dict,
+    window_duration: str,
+    watermark_delay: str,
+    checkpoint_location: str = None,
+):
+    """Lanza la consulta que reporta telemetría real de Kafka/Spark a `serving.pipeline_status`."""
+    writer = (
+        metrics_raw_df.writeStream
+        .foreachBatch(make_speed_layer_heartbeat_sink(pg_conn_params, window_duration, watermark_delay))
+        .outputMode("update")
+    )
+    if checkpoint_location:
+        writer = writer.option("checkpointLocation", checkpoint_location)
+    return writer.start()
+
+
+def make_dlq_heartbeat_sink(pg_conn_params: dict):
+    """Reporta a `serving.pipeline_status` cuántos eventos reales cayeron a DLQ en el último micro-batch."""
+
+    def _sink(batch_df: DataFrame, batch_id: int) -> None:
+        count = batch_df.count()
+        upsert_pipeline_status(
+            pg_conn_params,
+            "dlq_isolation",
+            "SUCCESS" if count == 0 else "WARNING",
+            0,
+            {"rejected_events_last_batch": count, "batch_id": batch_id},
+        )
+
+    return _sink
+
+
+def start_dlq_heartbeat_query(
+    dlq_df: DataFrame,
+    pg_conn_params: dict,
+    checkpoint_location: str = None,
+):
+    """Lanza la consulta que reporta el conteo real de rechazos de DLQ a `serving.pipeline_status`."""
+    writer = (
+        dlq_df.writeStream
+        .foreachBatch(make_dlq_heartbeat_sink(pg_conn_params))
+        .outputMode("update")
+    )
+    if checkpoint_location:
+        writer = writer.option("checkpointLocation", checkpoint_location)
+    return writer.start()
+
+
 def start_console_query(
     stream_df: DataFrame,
     checkpoint_location: str = None,
@@ -802,6 +930,32 @@ def main(argv=None):
         print(
             f"🗄️  Query Postgres activa hacia 'serving.realtime_metrics' "
             f"(Query ID: {postgres_query.id})"
+        )
+
+        # 5b. Telemetría real del pipeline hacia `serving.pipeline_status`
+        # (lo que lee el panel "Pipeline Health" del dashboard).
+        heartbeat_checkpoint = os.path.join(args.checkpoint_dir, "pipeline_status_heartbeat")
+        heartbeat_query = start_speed_layer_heartbeat_query(
+            metrics_raw_df=metrics_raw,
+            pg_conn_params=pg_conn_params,
+            window_duration=args.window_duration,
+            watermark_delay=args.watermark_delay,
+            checkpoint_location=heartbeat_checkpoint,
+        )
+        print(
+            f"💓 Heartbeat Kafka/Spark activo hacia 'serving.pipeline_status' "
+            f"(Query ID: {heartbeat_query.id})"
+        )
+
+        dlq_heartbeat_checkpoint = os.path.join(args.checkpoint_dir, "pipeline_status_dlq")
+        dlq_heartbeat_query = start_dlq_heartbeat_query(
+            dlq_df=dlq_stream,
+            pg_conn_params=pg_conn_params,
+            checkpoint_location=dlq_heartbeat_checkpoint,
+        )
+        print(
+            f"💓 Heartbeat DLQ activo hacia 'serving.pipeline_status' "
+            f"(Query ID: {dlq_heartbeat_query.id})"
         )
 
     # 6. Monitoreo por consola si fue solicitado

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { DashboardInterval, OHLCVCandle } from "@/lib/types";
-import { clamp, cn, formatCompact, formatNumber } from "@/lib/utils";
+import { clamp, cn, formatCompact, formatNumber, toBogota } from "@/lib/utils";
 
 const BULL = "#10B981";
 const BEAR = "#F43F5E";
@@ -64,7 +64,7 @@ function priceDigits(price: number): number {
 }
 
 function axisLabel(iso: string, interval: DashboardInterval): string {
-  const date = new Date(iso);
+  const date = toBogota(new Date(iso));
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
   const hh = String(date.getUTCHours()).padStart(2, "0");
@@ -348,7 +348,10 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
           className="pointer-events-none absolute z-20 rounded-lg border border-white/10 bg-zinc-950 px-3 py-2 font-mono text-[10px] tabular-nums shadow-[0_10px_40px_-10px_rgba(0,0,0,0.9)]"
         >
           <div className="mb-1 text-zinc-500">
-            {interval === "1d" ? hovered.timestamp.slice(0, 10) + " UTC" : hovered.timestamp.replace("T", " ").slice(0, 19) + " UTC"}
+            {(() => {
+              const bogota = toBogota(new Date(hovered.timestamp)).toISOString();
+              return interval === "1d" ? bogota.slice(0, 10) + " COT" : bogota.replace("T", " ").slice(0, 19) + " COT";
+            })()}
           </div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
             <span className="text-zinc-500">O</span>

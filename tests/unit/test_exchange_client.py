@@ -96,7 +96,8 @@ def test_fetch_depth_and_trades_mapping(monkeypatch) -> None:
     assert trades["trades"][0]["whale"] is True
 
 
-def test_query_service_marks_synthetic_fallback(monkeypatch) -> None:
+def test_query_service_raises_when_no_real_source_available(monkeypatch) -> None:
+    """Sin Postgres y sin Binance, el servicio nunca debe inventar velas."""
     service = QueryService()
     service._pg_available = False
     service._pg_checked_at = time.monotonic()
@@ -105,7 +106,5 @@ def test_query_service_marks_synthetic_fallback(monkeypatch) -> None:
         raise exchange_client.ExchangeUnavailable("test: exchange down")
 
     monkeypatch.setattr(exchange_client, "fetch_klines", unavailable)
-    payload = service.get_market_ohlcv("BTCUSDT", "15m", 5)
-    assert payload["is_live"] is False
-    assert payload["source"] == "SIMULATED_FALLBACK"
-    assert len(payload["candles"]) == 5
+    with pytest.raises(exchange_client.ExchangeUnavailable):
+        service.get_market_ohlcv("BTCUSDT", "15m", 5)

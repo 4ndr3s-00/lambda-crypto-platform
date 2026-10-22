@@ -1,7 +1,7 @@
 "use client";
 
 import type { ArbitrageQuote, LiquidationEvent, OnChainSnapshot } from "@/lib/types";
-import { cn, formatCompact, formatNumber, formatUsd } from "@/lib/utils";
+import { cn, formatCompact, formatNumber, formatUsd, toBogota } from "@/lib/utils";
 import { Panel } from "./Panel";
 
 export function ArbitrageMatrix({ quotes }: { quotes: ArbitrageQuote[] }) {
@@ -53,7 +53,7 @@ export function LiquidationRadar({ events }: { events: LiquidationEvent[] }) {
             key={event.id}
             className="grid grid-cols-[1fr_0.7fr_0.8fr_0.7fr] gap-1 rounded-sm px-1 py-[3px] font-mono text-[9px] tabular-nums"
           >
-            <span className="text-zinc-600">{new Date(event.timestamp).toISOString().slice(11, 19)}</span>
+            <span className="text-zinc-600">{toBogota(new Date(event.timestamp)).toISOString().slice(11, 19)}</span>
             <span className="text-right text-zinc-300">${formatCompact(event.amount)}</span>
             <span className={cn("text-right font-medium", event.direction === "LONG" ? "text-emerald-400" : "text-rose-400")}>
               {event.direction}

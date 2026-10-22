@@ -82,6 +82,11 @@ try:
 except ImportError:  # Docker / uvicorn main:app
     from exchange_client import ExchangeUnavailable
 
+try:
+    from .query_service import QueryServiceError
+except ImportError:  # Docker / uvicorn main:app
+    from query_service import QueryServiceError
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("ServingAPI")
 
@@ -189,7 +194,10 @@ def get_assets(
     page_size: int = Query(20, ge=1, le=100),
 ) -> dict[str, Any]:
     offset = (page - 1) * page_size
-    return query_service.get_assets(exchange=exchange, status=status_filter, limit=page_size, offset=offset)
+    try:
+        return query_service.get_assets(exchange=exchange, status=status_filter, limit=page_size, offset=offset)
+    except QueryServiceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.get("/api/ohlcv", response_model=OHLCVResponse, tags=["Series Financieras"])
@@ -213,7 +221,10 @@ def get_ohlcv(
 @app.get("/api/metrics", response_model=MetricsResponse, tags=["MÃ©tricas en Tiempo Real"])
 def get_metrics(symbol: Optional[str] = Query(None)) -> dict[str, Any]:
     clean_symbol = sanitize_symbol(symbol) if symbol else None
-    return query_service.get_metrics(symbol=clean_symbol)
+    try:
+        return query_service.get_metrics(symbol=clean_symbol)
+    except QueryServiceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 try:
@@ -230,7 +241,10 @@ from fastapi import Depends
     dependencies=[Depends(verify_admin_auth)],
 )
 def get_pipeline_status() -> dict[str, Any]:
-    return query_service.get_pipeline_status()
+    try:
+        return query_service.get_pipeline_status()
+    except QueryServiceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +270,8 @@ def get_market_ohlcv(
     try:
         payload = query_service.get_market_ohlcv(symbol, interval, limit)
         return MarketOHLCVResponse.model_validate(payload)
+    except ExchangeUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"no hay datos reales disponibles: {exc}") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -268,6 +284,8 @@ def get_market_metrics(
     try:
         payload = query_service.get_market_metrics(symbol, window=window)
         return MarketMetricsResponse.model_validate(payload)
+    except ExchangeUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"no hay datos reales disponibles: {exc}") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

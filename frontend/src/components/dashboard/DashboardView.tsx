@@ -57,7 +57,7 @@ export function DashboardView({ interval, onIntervalChange, onBack }: DashboardV
       void mockApi.getPipelineStatus().then((status) => {
         if (!cancelled) {
           setPipeline(status);
-          setLagSec(0.4 + Math.random() * 0.8);
+          setLagSec(status.freshnessSeconds);
         }
       });
     };
