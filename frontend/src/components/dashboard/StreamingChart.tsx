@@ -83,6 +83,9 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
   const [size, setSize] = useState<Size>({ w: 0, h: 0 });
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [cursor, setCursor] = useState<CursorPoint | null>(null);
+  const autoScrolled = useRef(false);
+  const minCandleWidth = interval === "1d" ? 12 : 7;
+  const contentWidth = Math.max(size.w, candles.length * minCandleWidth);
 
   useEffect(() => {
     const node = wrapRef.current;
@@ -112,11 +115,22 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
       priceBottom,
       volTop,
       volBottom,
-      width: Math.max(1, size.w - left - right),
+      width: Math.max(1, contentWidth - left - right),
       priceHeight: Math.max(1, priceBottom - top),
       volHeight: Math.max(1, volBottom - volTop),
     };
-  }, [size]);
+  }, [size, contentWidth]);
+
+  useEffect(() => {
+    autoScrolled.current = false;
+  }, [interval]);
+
+  useEffect(() => {
+    const node = wrapRef.current;
+    if (!node || autoScrolled.current || candles.length === 0) return;
+    node.scrollLeft = node.scrollWidth;
+    autoScrolled.current = true;
+  }, [candles.length, interval]);
 
   const { bounds, maxVolume, grid } = useMemo(() => {
     const b = computeBounds(candles);
@@ -146,11 +160,17 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
   const handleMove = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (candles.length === 0) return;
     const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left;
+    const wrapRect = wrapRef.current?.getBoundingClientRect();
+    const contentX = event.clientX - rect.left;
     const y = event.clientY - rect.top;
-    const index = Math.round((x - plot.left - step / 2) / step);
+    const index = Math.round((contentX - plot.left - step / 2) / step);
     setHoveredIndex(clamp(index, 0, candles.length - 1));
-    setCursor({ x, y, width: rect.width, height: rect.height });
+    setCursor({
+      x: wrapRect ? event.clientX - wrapRect.left : contentX,
+      y,
+      width: wrapRect?.width ?? rect.width,
+      height: rect.height,
+    });
   };
 
   const handleLeave = () => {
@@ -171,12 +191,12 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
   }, [cursor]);
 
   return (
-    <div ref={wrapRef} className="relative h-full w-full">
+    <div ref={wrapRef} className="relative h-full w-full overflow-x-auto overscroll-x-contain [scrollbar-width:thin]">
       {size.w > 0 && size.h > 0 && (
         <svg
-          width={size.w}
+          width={contentWidth}
           height={size.h}
-          viewBox={`0 0 ${size.w} ${size.h}`}
+          viewBox={`0 0 ${contentWidth} ${size.h}`}
           className="h-full w-full touch-none"
           onPointerMove={handleMove}
           onPointerLeave={handleLeave}

@@ -56,7 +56,7 @@ export function AssetDeepDive({ symbol, interval, onIntervalChange, onBack }: As
 
     const load = async () => {
       try {
-        const next = await mockApi.getOHLCV({ symbol, interval, limit: 96 });
+        const next = await mockApi.getOHLCV({ symbol, interval, limit: interval === "1d" ? 100 : 96 });
         if (cancelled) return;
         setSeries(next);
         setSeriesError(next.isLive ? null : next.error ?? "datos simulados");
