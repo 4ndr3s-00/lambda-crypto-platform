@@ -4,7 +4,7 @@ import { useEffect, useId, useMemo, useState, type PointerEvent as ReactPointerE
 import { AnimatePresence, motion } from "framer-motion";
 import type { DataArtifact as ArtifactModel, MarketInterval, OHLCVCandle } from "@/lib/types";
 import { MARKET_INTERVALS, isMarketInterval, regenerateArtifact } from "@/lib/mockData";
-import { clamp, cn, formatCompact, formatNumber, formatPercent, formatUsd } from "@/lib/utils";
+import { clamp, cn, formatCompact, formatNumber, formatPercent, formatUsd, toBogota } from "@/lib/utils";
 
 const BULL = "#10B981";
 const BEAR = "#F43F5E";
@@ -70,7 +70,7 @@ function candleX(index: number, count: number): number {
 }
 
 function timeLabel(iso: string): string {
-  const date = new Date(iso);
+  const date = toBogota(new Date(iso));
   const hh = String(date.getUTCHours()).padStart(2, "0");
   const mm = String(date.getUTCMinutes()).padStart(2, "0");
   return `${hh}:${mm}`;

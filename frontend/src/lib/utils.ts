@@ -27,7 +27,15 @@ export function formatCompact(value: number): string {
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(value);
 }
 
-/** `YYYY-MM-DD HH:MM:SS UTC`, used for cutoff timestamps across the console. */
+/** Colombia (America/Bogota) is a fixed UTC-5 offset, no daylight saving — a plain shift is exact. */
+const BOGOTA_OFFSET_MS = -5 * 60 * 60 * 1000;
+
+/** Shifts a Date so its `getUTC*` getters read as Bogota wall-clock time. */
+export function toBogota(date: Date): Date {
+  return new Date(date.getTime() + BOGOTA_OFFSET_MS);
+}
+
+/** `YYYY-MM-DD HH:MM:SS COT`, used for cutoff timestamps across the console. */
 export function formatUtcStamp(date: Date): string {
-  return `${date.toISOString().slice(0, 19).replace("T", " ")} UTC`;
+  return `${toBogota(date).toISOString().slice(0, 19).replace("T", " ")} COT`;
 }
