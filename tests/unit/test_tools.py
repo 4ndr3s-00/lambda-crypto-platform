@@ -51,6 +51,6 @@ def test_rejects_unknown_tool() -> None:
 
 
 def test_rejects_invalid_arguments() -> None:
-    result = registry().execute("query_timeseries", {"symbol": "BTCUSDT", "interval": "15m", "limit": 500})
+    result = registry().execute("query_timeseries", {"symbol": "BTCUSDT", "interval": "15m", "limit": 1001})
     assert result.ok is False
     assert "inválidos" in (result.error or "")

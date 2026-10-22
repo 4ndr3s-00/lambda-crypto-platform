@@ -433,7 +433,7 @@ class QueryService:
             raise ValueError(f"simbolo no soportado: {symbol}. Validos: {', '.join(market_data.SUPPORTED_SYMBOLS)}")
         if interval not in market_data.INTERVALS:
             raise ValueError(f"interval no soportado: {interval}. V?lidos: {', '.join(market_data.SUPPORTED_INTERVALS)}")
-        safe_limit = max(1, min(int(limit), 500))
+        safe_limit = max(1, min(int(limit), 1000))
 
         # 1) Serving tables populated by the real Kafka/Spark pipeline.
         if self._postgres_available():
@@ -452,7 +452,7 @@ class QueryService:
                     for row in rows
                 ]
                 candles = [candle for candle in candles if candle["close"] > 0]
-                if candles:
+                if len(candles) >= safe_limit:
                     return {
                         "symbol": clean_symbol,
                         "interval": interval,
@@ -466,6 +466,10 @@ class QueryService:
                         "is_live": True,
                         "fetched_at": _iso(datetime.now(timezone.utc)),
                     }
+                logger.info(
+                    "OHLCV DB insuficiente para %s %s: %s/%s velas; completando con exchange",
+                    clean_symbol, interval, len(candles), safe_limit,
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("get_market_ohlcv Postgres fallback: %s", exc)
 
@@ -550,33 +554,27 @@ class QueryService:
     def get_market_metrics(self, symbol: str, window: str = "24h") -> Dict[str, Any]:
         clean_symbol = sanitize_symbol(symbol)
 
-        # 1) Real serving table.
-        if self._postgres_available():
-            try:
-                payload = self.get_ohlcv(clean_symbol, interval="1h", limit=24)
-                rows = payload.get("data", []) if isinstance(payload, dict) else []
-                candles = [
-                    {
-                        "timestamp": _iso(row.get("bucket_start")),
-                        "open": float(row.get("open_price", 0)),
-                        "high": float(row.get("high_price", 0)),
-                        "low": float(row.get("low_price", 0)),
-                        "close": float(row.get("close_price", 0)),
-                        "volume": float(row.get("volume", 0)),
-                    }
-                    for row in rows
-                ]
+        window_hours = {"1h": 1, "4h": 4, "24h": 24, "7d": 168}.get(window, 24)
+        interval = "15m" if window_hours <= 4 else "1h"
+        limit = max(2, window_hours * 4 if interval == "15m" else window_hours)
+
+        # 1) Serving table, completed from Binance if the requested window is
+        # longer than the reconciled history available.
+        try:
+            payload = self.get_market_ohlcv(clean_symbol, interval=interval, limit=limit)
+            candles = payload.get("candles", []) if isinstance(payload, dict) else []
+            if len(candles) >= 2:
                 return self._metrics_from_candles(
                     clean_symbol,
                     window,
                     candles,
-                    "serving.ohlcv_reconciled (Postgres)",
-                    True,
-                    _iso(datetime.now(timezone.utc)),
-                    "postgres_reconciled",
+                    str(payload.get("source") or "serving.ohlcv_reconciled (Postgres)"),
+                    bool(payload.get("is_live", True)),
+                    str(payload.get("fetched_at") or _iso(datetime.now(timezone.utc))),
+                    str(payload.get("data_source") or "postgres_reconciled"),
                 )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("get_market_metrics Postgres fallback: %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_market_metrics OHLCV fallback: %s", exc)
 
         # 1b) Speed Layer snapshot when reconciled candles are not available yet.
         # The streaming sink writes this table directly, so it is real pipeline
@@ -619,7 +617,7 @@ class QueryService:
 
         # 2) Real Binance data.
         try:
-            live = exchange_client.fetch_klines(clean_symbol, "1h", 24)
+            live = exchange_client.fetch_klines(clean_symbol, interval, limit)
             return self._metrics_from_candles(
                 clean_symbol,
                 window,

@@ -191,3 +191,14 @@ def test_short_farewell_without_accent_is_lexical() -> None:
     decision = asyncio.run(router().route("adios"))
     assert decision.kind == "farewell"
     assert decision.backend == "lexical"
+
+
+def test_week_history_uses_daily_interval_and_seven_candles() -> None:
+    service = _service()
+    result = service._fallback("Dame los datos de la semana de BTC", "BTCUSDT", "15m")
+    assert result["tool_results"], "debe ejecutar query_timeseries"
+    tool = result["tool_results"][0]
+    assert tool.name == "query_timeseries"
+    assert tool.arguments["interval"] == "1d"
+    assert tool.arguments["limit"] == 7
+    assert "7 velas" in result["answer"]
