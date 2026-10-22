@@ -158,3 +158,50 @@ def test_init_buckets_script_executable_and_valid():
 
     # Verificación Anti-Medallion en el script
     assert "bronze" in content and "silver" in content and "gold" in content
+
+
+def _spark_quarantine_actions(policy_text: str) -> list:
+    """Devuelve las acciones del statement que cubre `market-quarantine/*`."""
+    for stmt in json.loads(policy_text)["Statement"]:
+        res = stmt.get("Resource")
+        resources = res if isinstance(res, list) else [res]
+        if "arn:aws:s3:::market-quarantine/*" in resources:
+            actions = stmt.get("Action")
+            return actions if isinstance(actions, list) else [actions]
+    raise AssertionError("No se encontró un statement que cubra market-quarantine/*")
+
+
+def _init_heredoc(script_text: str, filename: str) -> str:
+    """Extrae el JSON que `init-buckets.sh` escribe vía `cat << 'EOF'`."""
+    marker = f'cat << \'EOF\' > "${{TMP_POLICIES_DIR}}/{filename}"'
+    start = script_text.index(marker) + len(marker)
+    end = script_text.index("\nEOF", start)
+    return script_text[start:end].lstrip("\n")
+
+
+def test_spark_dlq_permite_leer_borrar_y_escribir_en_ambas_definiciones():
+    """
+    Regresión: la escritura de la DLQ con `mode=overwrite` exige tres permisos
+    de S3A que la política de Spark no concedía:
+
+    1. `GetObject` — S3A hace `getFileStatus` (HEAD) del directorio de destino
+       antes de escribir, y MinIO responde 403 —y no 404— sin ese permiso.
+    2. `DeleteObject` — el committer de S3A borra el directorio temporal
+       (`.spark-staging-*`) tras confirmar la escritura.
+    3. `PutObject`/`AbortMultipartUpload` — la escritura en sí.
+
+    La política de Spark existe en dos sitios (el JSON montado en `/policies`
+    y el heredoc que `init-buckets.sh` envía a `mc admin policy`); ambos deben
+    otorgar los permisos, o `make up` revierte el fix silenciosamente.
+    """
+    json_path = POLICIES_DIR / "spark-policy.json"
+    heredoc = _init_heredoc(INIT_SCRIPT.read_text(), "spark-policy.json")
+
+    for origen, policy_text in (("spark-policy.json", json_path.read_text()),
+                                ("init-buckets.sh", heredoc)):
+        actions = _spark_quarantine_actions(policy_text)
+        for required in ("s3:GetObject", "s3:PutObject", "s3:DeleteObject"):
+            assert required in actions, (
+                f"{origen} no concede {required} sobre market-quarantine/*: "
+                f"el job Batch con --quarantine-invalid falla escribiendo la DLQ."
+            )

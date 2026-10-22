@@ -15,7 +15,7 @@ Las pruebas utilizan una SparkSession local determinista (`local[2]`).
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -93,7 +93,13 @@ def test_bdd_us18_criterio_1_deserializacion_json_y_tipado(spark):
     # Verificación estricta de tipo Timestamp
     event_time_field = [f for f in valid_df.schema.fields if f.name == "event_time"][0]
     assert isinstance(event_time_field.dataType, TimestampType)
-    assert row.event_time == datetime(2026, 10, 19, 14, 30, 0)
+
+    # El instante se compara en epoch y no contra un datetime naive: Spark
+    # devuelve los Timestamp como fecha sin zona en la zona horaria local del
+    # driver, así que comparar contra una fecha naive fija en UTC solo
+    # pasaría en máquinas cuyo reloj local coincida con UTC.
+    expected_epoch = int(datetime(2026, 10, 19, 14, 30, tzinfo=timezone.utc).timestamp())
+    assert int(row.event_time.timestamp()) == expected_epoch
 
 
 def test_bdd_us18_criterio_1_campos_opcionales_nulos(spark):
