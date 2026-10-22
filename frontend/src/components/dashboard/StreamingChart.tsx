@@ -191,13 +191,13 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
   }, [cursor]);
 
   return (
-    <div ref={wrapRef} className="relative h-full w-full overflow-x-auto overscroll-x-contain pb-2 [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-track]:bg-transparent">
+    <div ref={wrapRef} className="relative h-full w-full overflow-x-scroll overscroll-x-contain pb-2 [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-track]:bg-transparent">
       {size.w > 0 && size.h > 0 && (
         <svg
           width={contentWidth}
           height={size.h}
           viewBox={`0 0 ${contentWidth} ${size.h}`}
-          className="h-full w-full touch-none"
+          className="block h-full touch-none"
           onPointerMove={handleMove}
           onPointerLeave={handleLeave}
           role="img"
@@ -348,7 +348,7 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
           className="pointer-events-none absolute z-20 rounded-lg border border-white/10 bg-zinc-950 px-3 py-2 font-mono text-[10px] tabular-nums shadow-[0_10px_40px_-10px_rgba(0,0,0,0.9)]"
         >
           <div className="mb-1 text-zinc-500">
-            {hovered.timestamp.replace("T", " ").slice(0, 19)} UTC
+            {interval === "1d" ? hovered.timestamp.slice(0, 10) + " UTC" : hovered.timestamp.replace("T", " ").slice(0, 19) + " UTC"}
           </div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
             <span className="text-zinc-500">O</span>
