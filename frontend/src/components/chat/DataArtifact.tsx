@@ -367,10 +367,21 @@ export function DataArtifact({ artifact }: DataArtifactProps) {
     setCursor(null);
   }, [artifact.interval, artifact.symbol]);
 
-  const view = useMemo(
-    () => (isMarket ? regenerateArtifact(artifact, activeInterval) : artifact),
-    [artifact, activeInterval, isMarket],
-  );
+  const [view, setView] = useState<ArtifactModel>(artifact);
+
+  useEffect(() => {
+    if (!isMarket) {
+      setView(artifact);
+      return;
+    }
+    let cancelled = false;
+    regenerateArtifact(artifact, activeInterval).then((next) => {
+      if (!cancelled) setView(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [artifact, activeInterval, isMarket]);
 
   const hovered = hoveredIndex !== null ? view.data[hoveredIndex] : undefined;
 
@@ -420,6 +431,14 @@ export function DataArtifact({ artifact }: DataArtifactProps) {
           <span className="rounded-full border border-white/10 px-2 py-0.5 font-mono text-[10px] text-zinc-500">
             {view.type}
           </span>
+          {view.isLive === false && (
+            <span
+              className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] text-amber-400"
+              title={view.error ?? "Binance no disponible"}
+            >
+              sin datos reales
+            </span>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
           <div className="flex items-center rounded-full border border-white/10 bg-white/[0.02] p-0.5">

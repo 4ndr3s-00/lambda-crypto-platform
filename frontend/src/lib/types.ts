@@ -41,6 +41,8 @@ export interface DataArtifact {
   data: OHLCVCandle[];
   summary: ArtifactSummary;
   peers?: ArtifactPeer[];
+  isLive?: boolean;
+  error?: string;
 }
 
 export type LayerSource = "SPEED_LAYER" | "BATCH_LAYER" | "RECONCILED";
@@ -49,12 +51,13 @@ export interface SQLInspectionData {
   layerSource: LayerSource;
   generatedSql: string;
   sourceDataset: string;
-  watermarkDelaySec: number;
-  idempotencyVerified: boolean;
-  dataFreshness: string;
   engine: string;
   executionTimeMs: number;
   cutoffDate: string;
+  /** Solo presentes cuando el backend real los reporta; si no, el panel no los muestra. */
+  watermarkDelaySec?: number;
+  idempotencyVerified?: boolean;
+  dataFreshness?: string;
 }
 
 export interface LineageInfo {
@@ -101,6 +104,7 @@ export interface AssetCardData {
   volume24h: number;
   sparkline: number[];
   isLive: boolean;
+  error?: string;
 }
 
 export interface MarketOverviewResponse {
@@ -171,8 +175,13 @@ export interface OnChainSnapshot {
 
 export interface PipelineStatusResponse {
   kafka: { consumerLag: number };
+  spark: { status: string };
   airflow: { status: string };
+  minio: { status: string };
   dlq: { rejectedEvents: number };
+  /** "postgres_reconciled" cuando el backend tiene telemetría real; "no_data_available" si no. */
+  dataSource: string;
+  freshnessSeconds: number;
 }
 
 export interface GlobalTelemetryData {

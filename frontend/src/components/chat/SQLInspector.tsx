@@ -123,9 +123,11 @@ export function SQLInspector({ data }: SQLInspectorProps) {
   };
 
   const watermark =
-    data.watermarkDelaySec > 0
-      ? `${data.watermarkDelaySec}s de tolerancia (event-time)`
-      : "sin watermark (snapshot batch congelado)";
+    data.watermarkDelaySec === undefined
+      ? undefined
+      : data.watermarkDelaySec > 0
+        ? `${data.watermarkDelaySec}s de tolerancia (event-time)`
+        : "sin watermark (snapshot batch congelado)";
 
   return (
     <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.015]">
@@ -194,16 +196,18 @@ export function SQLInspector({ data }: SQLInspectorProps) {
                 <Provenance label="Ingesta" value="Binance WebSocket · Stream: market.events" />
                 <Provenance label="Dataset" value={data.sourceDataset} mono />
                 <Provenance label="Capa" value={layer.label} />
-                <Provenance label="Watermark / Tolerancia" value={watermark} />
-                <Provenance
-                  label="Reconciliación"
-                  value={
-                    data.idempotencyVerified
-                      ? "Event-time deduplication / Idempotencia garantizada"
-                      : "Sin verificar"
-                  }
-                />
-                <Provenance label="Frescura" value={data.dataFreshness} />
+                {watermark && <Provenance label="Watermark / Tolerancia" value={watermark} />}
+                {data.idempotencyVerified !== undefined && (
+                  <Provenance
+                    label="Reconciliación"
+                    value={
+                      data.idempotencyVerified
+                        ? "Event-time deduplication / Idempotencia garantizada"
+                        : "Sin verificar"
+                    }
+                  />
+                )}
+                {data.dataFreshness && <Provenance label="Frescura" value={data.dataFreshness} />}
                 <Provenance label="Engine" value={`${data.engine} · ${data.executionTimeMs}ms`} mono />
                 <Provenance label="Fecha de corte" value={formatUtcStamp(new Date(data.cutoffDate))} mono />
               </div>

@@ -22,28 +22,28 @@ interface DockRow {
 export function PipelineDock({ status, lagSec }: PipelineDockProps) {
   const [open, setOpen] = useState(false);
 
+  const isReal = status?.dataSource === "postgres_reconciled";
+
   const rows: DockRow[] = [
     {
       label: "Kafka Ingestion",
-      value: status
-        ? `ACTIVO (Topics: market.events · Lag: ${status.kafka.consumerLag})`
-        : "ACTIVO (Topics: market.events · Lag: 0)",
+      value: status ? `Topics: market.events · Lag: ${status.kafka.consumerLag}` : "sin datos reales",
     },
     {
       label: "Spark Streaming",
-      value: "PROCESANDO (Ventana 2s · Watermark 5s)",
+      value: status ? status.spark.status : "sin datos reales",
     },
     {
       label: "Airflow Batch",
-      value: status ? `DAG batch_recompute ${status.airflow.status}` : "DAG batch_recompute SUCCESS",
+      value: status ? `DAG batch_recompute ${status.airflow.status}` : "sin datos reales",
     },
     {
       label: "MinIO Data Lake",
-      value: "PARQUET SYNCED (s3://market-lake/)",
+      value: status ? status.minio.status : "sin datos reales",
     },
     {
       label: "DLQ Isolation",
-      value: status ? `${status.dlq.rejectedEvents} ERRORES / RECHAZOS` : "0 ERRORES / RECHAZOS",
+      value: status ? `${status.dlq.rejectedEvents} ERRORES / RECHAZOS` : "sin datos reales",
     },
   ];
 
@@ -58,7 +58,11 @@ export function PipelineDock({ status, lagSec }: PipelineDockProps) {
         >
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px] uppercase tracking-wider text-zinc-400">
             <span>Pipeline Health</span>
-            <span className="text-amber-400">● SIMULADO</span>
+            {isReal ? (
+              <span className="text-emerald-400">● REAL</span>
+            ) : (
+              <span className="text-amber-400">● SIN DATOS REALES</span>
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-3 font-mono text-[10px] text-zinc-600">
             <span>Frescura {lagSec.toFixed(1)}s</span>
@@ -87,7 +91,7 @@ export function PipelineDock({ status, lagSec }: PipelineDockProps) {
                   <div key={row.label} className="flex flex-col gap-0.5 bg-zinc-950/60 px-3 py-2.5">
                     <span className="font-mono text-[9px] uppercase tracking-wider text-zinc-600">{row.label}</span>
                     <span className={cn("font-mono text-[10px] text-zinc-300")}>
-                      <span className="text-emerald-400">●</span> {row.value}
+                      <span className={isReal ? "text-emerald-400" : "text-amber-400"}>●</span> {row.value}
                     </span>
                   </div>
                 ))}

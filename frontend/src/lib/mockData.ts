@@ -47,57 +47,6 @@ function pairFor(symbol: string): string {
   return DASHBOARD_ASSETS.find((asset) => asset.symbol === symbol)?.pair ?? `${symbol}USDT`;
 }
 
-function mulberry32(seed: number): () => number {
-  let a = seed;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function symbolSeed(symbol: string): number {
-  return symbol.split("").reduce((acc, char) => acc * 31 + char.charCodeAt(0), 7);
-}
-
-/** Synthetic OHLCV used only when Binance is unreachable — always labeled SIMULADO in the UI. */
-function simulateCandles(symbol: string, interval: string, limit: number): OHLCVCandle[] {
-  const rand = mulberry32(symbolSeed(symbol) + interval.length);
-  const stepMs = intervalToMs(interval);
-  let price = 100 + (symbolSeed(symbol) % 900);
-  const now = Date.now();
-  const candles: OHLCVCandle[] = [];
-  for (let i = limit - 1; i >= 0; i -= 1) {
-    const open = price;
-    const drift = (rand() - 0.5) * open * 0.01;
-    const close = Math.max(0.01, open + drift);
-    const high = Math.max(open, close) * (1 + rand() * 0.002);
-    const low = Math.min(open, close) * (1 - rand() * 0.002);
-    const volume = 50 + rand() * 950;
-    candles.push({
-      timestamp: new Date(now - i * stepMs).toISOString(),
-      open,
-      high,
-      low,
-      close,
-      volume,
-    });
-    price = close;
-  }
-  return candles;
-}
-
-function intervalToMs(interval: string): number {
-  const unit = interval.slice(-1);
-  const value = Number.parseInt(interval, 10) || 1;
-  if (unit === "m") return value * 60_000;
-  if (unit === "h") return value * 3_600_000;
-  if (unit === "d") return value * 86_400_000;
-  return 60_000;
-}
-
 function summarize(candles: OHLCVCandle[]): { totalVolume: number; priceChangePercent: number; vwap: number } {
   const totalVolume = candles.reduce((acc, c) => acc + c.volume, 0);
   const first = candles[0];
@@ -108,14 +57,16 @@ function summarize(candles: OHLCVCandle[]): { totalVolume: number; priceChangePe
   return { totalVolume, priceChangePercent, vwap };
 }
 
-/** Rebuilds a chat data-artifact's series at a different timeframe (synthetic, seeded by symbol). */
-export function regenerateArtifact(artifact: DataArtifact, interval: MarketInterval): DataArtifact {
-  const data = simulateCandles(artifact.symbol, interval, 48);
+/** Refetches a chat data-artifact's series at a different timeframe from Binance. */
+export async function regenerateArtifact(artifact: DataArtifact, interval: MarketInterval): Promise<DataArtifact> {
+  const payload = await fetchOHLCV({ symbol: artifact.symbol, interval, limit: 48 });
   return {
     ...artifact,
     interval,
-    data,
-    summary: summarize(data),
+    data: payload.candles,
+    summary: summarize(payload.candles),
+    isLive: payload.isLive,
+    error: payload.error,
   };
 }
 
@@ -150,7 +101,7 @@ async function fetchOverview(): Promise<MarketOverviewResponse> {
       DASHBOARD_ASSETS.map(async (asset) => {
         const ticker = tickers.find((t) => t.symbol === asset.pair);
         if (!ticker) {
-          return simulatedAsset(asset);
+          return unavailableAsset(asset, `Binance no devolvió datos para ${asset.pair}`);
         }
         let sparkline: number[] = [];
         try {
@@ -181,33 +132,35 @@ async function fetchOverview(): Promise<MarketOverviewResponse> {
     const message = error instanceof Error ? error.message : "Binance no disponible";
     errors.push(message);
     return {
-      assets: DASHBOARD_ASSETS.map((asset) => simulatedAsset(asset)),
-      source: "Simulado",
+      assets: DASHBOARD_ASSETS.map((asset) => unavailableAsset(asset, message)),
+      source: "unavailable",
       isLive: false,
       errors,
     };
   }
 }
 
-function simulatedAsset(asset: { symbol: DashboardSymbol; base: string; quote: string }): AssetCardData {
-  const candles = simulateCandles(asset.symbol, "15m", 24);
-  const last = candles[candles.length - 1];
-  const first = candles[0];
+/** Explicit "no real data" state — never a fabricated price. */
+function unavailableAsset(
+  asset: { symbol: DashboardSymbol; base: string; quote: string },
+  error: string,
+): AssetCardData {
   return {
     symbol: asset.symbol,
     base: asset.base,
     quote: asset.quote,
     exchange: EXCHANGE,
-    source: "Simulado",
-    price: last?.close ?? 0,
-    change24h: first && last && first.open > 0 ? ((last.close - first.open) / first.open) * 100 : 0,
-    volume24h: candles.reduce((acc, c) => acc + c.volume * c.close, 0),
-    sparkline: candles.map((c) => c.close),
+    source: "unavailable",
+    price: 0,
+    change24h: 0,
+    volume24h: 0,
+    sparkline: [],
     isLive: false,
+    error,
   };
 }
 
-async function fetchOHLCV(params: { symbol: string; interval: DashboardInterval; limit: number }): Promise<OHLCVResponse> {
+async function fetchOHLCV(params: { symbol: string; interval: DashboardInterval | MarketInterval; limit: number }): Promise<OHLCVResponse> {
   const pair = pairFor(params.symbol);
   try {
     const klines = await fetchJson<unknown[][]>(
@@ -227,9 +180,9 @@ async function fetchOHLCV(params: { symbol: string; interval: DashboardInterval;
     return {
       symbol: params.symbol,
       interval: params.interval,
-      candles: simulateCandles(params.symbol, params.interval, params.limit),
+      candles: [],
       isLive: false,
-      source: "Simulado",
+      source: "unavailable",
       error: message,
     };
   }
@@ -260,7 +213,7 @@ async function fetchOrderBook(symbol: string, depth: number): Promise<OrderBookS
     const spreadPct = bestBid > 0 ? (spread / bestBid) * 100 : 0;
     return { bids, asks, obi, spread, spreadPct, source: EXCHANGE };
   } catch {
-    return { bids: [], asks: [], obi: 0, spread: 0, spreadPct: 0, source: "Simulado" };
+    return { bids: [], asks: [], obi: 0, spread: 0, spreadPct: 0, source: "unavailable" };
   }
 }
 
@@ -290,53 +243,93 @@ async function fetchTrades(symbol: string, limit: number): Promise<ExecutionTape
   }
 }
 
-async function fetchPipelineStatus(): Promise<PipelineStatusResponse> {
-  return {
-    kafka: { consumerLag: Math.floor(Math.random() * 40) },
-    airflow: { status: "SUCCESS" },
-    dlq: { rejectedEvents: Math.floor(Math.random() * 3) },
-  };
+interface BackendPipelineStatus {
+  kafka: { consumer_lag: number };
+  spark: { status: string };
+  airflow: { status: string };
+  minio: { status: string };
+  dlq: { rejected_events: number };
+  data_source: string;
+  freshness_seconds: number;
 }
 
-function buildChatReply(query: string): { message: ChatMessage } {
-  const now = new Date();
+/** Real telemetry from the serving API (same origin). No fabricated numbers on failure. */
+async function fetchPipelineStatus(): Promise<PipelineStatusResponse> {
+  try {
+    const payload = await fetchJson<BackendPipelineStatus>("/api/market/pipeline");
+    return {
+      kafka: { consumerLag: payload.kafka.consumer_lag },
+      spark: { status: payload.spark.status },
+      airflow: { status: payload.airflow.status },
+      minio: { status: payload.minio.status },
+      dlq: { rejectedEvents: payload.dlq.rejected_events },
+      dataSource: payload.data_source,
+      freshnessSeconds: payload.freshness_seconds,
+    };
+  } catch {
+    return {
+      kafka: { consumerLag: 0 },
+      spark: { status: "UNKNOWN" },
+      airflow: { status: "UNKNOWN" },
+      minio: { status: "UNKNOWN" },
+      dlq: { rejectedEvents: 0 },
+      dataSource: "no_data_available",
+      freshnessSeconds: 0,
+    };
+  }
+}
+
+interface BackendChatResponse {
+  answer: string;
+  sql: string | null;
+  provenance: string;
+  asset: string | null;
+  source: string | null;
+  sources: Array<{ source: string; title?: string | null; snippet?: string | null }>;
+  cutoff_time: string;
+  disclaimer: string;
+  latency_ms: number;
+}
+
+/** Backend's Provenance is a superset of the chart's LayerSource; map the rest onto RECONCILED. */
+function toLayerSource(provenance: string): "SPEED_LAYER" | "BATCH_LAYER" | "RECONCILED" {
+  if (provenance === "SPEED_LAYER" || provenance === "BATCH_LAYER") return provenance;
+  return "RECONCILED";
+}
+
+/** Calls the real serving API (Qwen2.5 + RAG + SQL tools). Fails loudly — never a canned reply. */
+async function postChat({ query }: { query: string }): Promise<{ message: ChatMessage }> {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: query }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`el asistente no respondió (${response.status}): ${detail}`);
+  }
+  const payload = (await response.json()) as BackendChatResponse;
+  const now = new Date().toISOString();
+
   const message: ChatMessage = {
-    id: `msg_assistant_${now.getTime()}`,
+    id: `msg_assistant_${Date.now()}`,
     role: "assistant",
-    timestamp: now.toISOString(),
-    content:
-      `Analicé "${query}" contra la capa reconciliada (Speed + Batch). ` +
-      "Los datos de mercado se consultan en vivo desde Binance; cuando el exchange no responde, " +
-      "el panel lo marca como simulado en lugar de inventar un precio.",
-    sqlInspection: {
-      layerSource: "RECONCILED",
-      generatedSql:
-        "SELECT symbol, date_trunc('hour', event_time) AS bucket,\n" +
-        "       avg(close) AS avg_close, sum(volume) AS volume\n" +
-        "FROM market_lake.batch_results\n" +
-        "WHERE metric = 'ohlcv' AND event_time >= now() - interval '1 day'\n" +
-        "GROUP BY symbol, bucket\n" +
-        "ORDER BY bucket DESC;",
-      sourceDataset: "s3://market-lake/batch-results/metric=ohlcv/",
-      watermarkDelaySec: 5,
-      idempotencyVerified: true,
-      dataFreshness: "< 5s (speed) / recálculo diario (batch)",
-      engine: "Spark SQL",
-      executionTimeMs: 180 + Math.floor(Math.random() * 220),
-      cutoffDate: now.toISOString(),
-    },
-    lineage: {
-      schemaVersion: "v1.3.0",
-      chain: ["Binance WS", "Kafka: market.events", "Spark Streaming", "MinIO: batch-results", "Serving API"],
-      dataset: "market_lake.batch_results / metric=ohlcv",
-      owner: "Andrés Blanco (Spark layer)",
-      retention: "365 días en frío, 7 días en caliente",
-      partitions: "date=YYYY-MM-DD",
-    },
+    timestamp: now,
+    content: payload.answer,
+    sqlInspection: payload.sql
+      ? {
+          layerSource: toLayerSource(payload.provenance),
+          generatedSql: payload.sql,
+          sourceDataset: payload.source ?? payload.asset ?? "serving layer",
+          engine: "Qwen2.5 + Serving API",
+          executionTimeMs: Math.round(payload.latency_ms),
+          cutoffDate: payload.cutoff_time,
+        }
+      : undefined,
     meta: {
-      sources: ["Binance", "Kafka", "Spark", "MinIO"],
-      disclaimer: "Respuesta generada por Qwen2.5 sobre datos reconciliados de la plataforma.",
-      cutoffDate: now.toISOString(),
+      sources: payload.sources.map((source) => source.title ?? source.source),
+      disclaimer: payload.disclaimer,
+      cutoffDate: payload.cutoff_time,
     },
   };
   return { message };
@@ -348,5 +341,5 @@ export const mockApi = {
   getOrderBook: fetchOrderBook,
   getTrades: fetchTrades,
   getPipelineStatus: fetchPipelineStatus,
-  postChat: async ({ query }: { query: string }) => buildChatReply(query),
+  postChat,
 };
