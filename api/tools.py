@@ -36,7 +36,7 @@ class MetricsArgs(BaseModel):
 class TimeseriesArgs(BaseModel):
     symbol: str = Field(default="BTCUSDT", min_length=3, max_length=30)
     interval: Literal["1m", "5m", "15m", "1h", "4h", "1d", "1D", "7D"] = "15m"
-    limit: int = Field(default=96, ge=1, le=100)
+    limit: int = Field(default=96, ge=1, le=1000)
 
 
 TOOL_SPECS: list[dict[str, Any]] = [
@@ -86,7 +86,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "function": {
             "name": "query_timeseries",
             "description": (
-                "Devuelve velas OHLCV recientes para un símbolo, intervalo y límite <= 100. "
+                "Devuelve velas OHLCV recientes para un símbolo, intervalo y límite <= 1000. "
                 "Usar para precios, máximos/mínimos, velas y series temporales."
             ),
             "parameters": {
@@ -94,7 +94,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
                 "properties": {
                     "symbol": {"type": "string", "enum": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]},
                     "interval": {"type": "string", "enum": list(INTERVALS)},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
                 },
                 "required": ["symbol", "interval", "limit"],
                 "additionalProperties": False,

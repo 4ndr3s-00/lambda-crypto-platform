@@ -89,6 +89,11 @@ def _detect_symbol(message: str, fallback: str) -> str:
 
 
 def _detect_interval(message: str, fallback: str) -> str:
+    lower = message.lower()
+    if re.search(r"\b(semana|week|7 d[ií]as|siete d[ií]as|diaria|daily)\b", lower):
+        return "1d"
+    if re.search(r"\b(4 horas|4 hours|4h)\b", lower):
+        return "4h"
     match = re.search(r"\b(1m|5m|15m|1h|4h|1d|7d)\b", message, re.IGNORECASE)
     if match:
         return match.group(1)
@@ -177,9 +182,15 @@ class LLMService:
             message,
             re.IGNORECASE,
         )
-        if pipeline_query:
-            # The pipeline snapshot is a local read-only tool, not a Groq
-            # completion. Keep it deterministic and cheap.
+        history_query = re.search(
+            r"\b(semana|week|7 d[ií]as|siete d[ií]as|historial|history)\b",
+            message,
+            re.IGNORECASE,
+        )
+        if pipeline_query or history_query:
+            # Pipeline snapshots and multi-day history are resolved with the
+            # local read-only tools. This avoids the model choosing 15m/24
+            # when the user asked for a week.
             model_result = self._fallback(message, symbol, interval)
         elif self.settings.groq_api_key:
             try:
@@ -330,7 +341,7 @@ class LLMService:
             content = str(response_message.get("content") or "").strip()
             refused = bool(
                 re.search(
-                    r"(no cuento con informaci[o?]n|no tengo informaci[o?]n|"
+                    r"(no cuento con informaci[oó]n|no tengo informaci[oó]n|"
                     r"i do not have information|i don't have information)",
                     content,
                     re.IGNORECASE,
@@ -363,7 +374,7 @@ class LLMService:
             # fall back to the deterministic tool summary.
             refused = bool(
                 re.search(
-                    r"(no cuento con informaci[o?]n|no tengo informaci[o?]n|"
+                    r"(no cuento con informaci[oó]n|no tengo informaci[oó]n|"
                     r"i do not have information|i don't have information)",
                     content,
                     re.IGNORECASE,
@@ -651,26 +662,26 @@ class LLMService:
             if is_en:
                 answer = (
                     "Lambda pipeline status:\n"
-                    f"- Kafka: {status['kafka']['status']} ? lag {status['kafka']['consumer_lag']} msgs ? "
+                    f"- Kafka: {status['kafka']['status']} · lag {status['kafka']['consumer_lag']} msgs · "
                     f"{status['kafka']['ingestion_rate']}\n"
-                    f"- Spark: {status['spark']['status']} ? window {status['spark']['window']} ? "
+                    f"- Spark: {status['spark']['status']} · window {status['spark']['window']} · "
                     f"watermark {status['spark']['watermark']}\n"
-                    f"- Airflow: {status['airflow']['dag_id']} {status['airflow']['status']} ? "
+                    f"- Airflow: {status['airflow']['dag_id']} {status['airflow']['status']} · "
                     f"last run {status['airflow']['last_run']}\n"
-                    f"- MinIO: {status['minio']['status']} ? {status['minio']['path']}\n"
+                    f"- MinIO: {status['minio']['status']} · {status['minio']['path']}\n"
                     f"- DLQ: {status['dlq']['rejected_events']} rejected events\n"
                     f"- Freshness: {status['freshness_seconds']}s"
                 )
             else:
                 answer = (
                     "Estado del pipeline Lambda:\n"
-                    f"- Kafka: {status['kafka']['status']} ? lag {status['kafka']['consumer_lag']} msgs ? "
+                    f"- Kafka: {status['kafka']['status']} · lag {status['kafka']['consumer_lag']} msgs · "
                     f"{status['kafka']['ingestion_rate']}\n"
-                    f"- Spark: {status['spark']['status']} ? ventana {status['spark']['window']} ? "
+                    f"- Spark: {status['spark']['status']} · ventana {status['spark']['window']} · "
                     f"watermark {status['spark']['watermark']}\n"
-                    f"- Airflow: {status['airflow']['dag_id']} {status['airflow']['status']} ? "
-                    f"?ltimo run {status['airflow']['last_run']}\n"
-                    f"- MinIO: {status['minio']['status']} ? {status['minio']['path']}\n"
+                    f"- Airflow: {status['airflow']['dag_id']} {status['airflow']['status']} · "
+                    f"último run {status['airflow']['last_run']}\n"
+                    f"- MinIO: {status['minio']['status']} · {status['minio']['path']}\n"
                     f"- DLQ: {status['dlq']['rejected_events']} rechazos\n"
                     f"- Frescura: {status['freshness_seconds']}s"
                 )
@@ -741,6 +752,46 @@ class LLMService:
                     )
             else:
                 answer = f"No pude calcular métricas: {result.error}"
+            return {
+                "answer": answer,
+                "sql": result.sql,
+                "provenance": result.provenance,
+                "tool_results": tool_results,
+                "tool_records": tool_records,
+            }
+
+        if re.search(r"\b(semana|week|7 d[ií]as|siete d[ií]as|historial|history)\b", lower):
+            target_interval = "1d" if re.search(r"(semana|week|diaria|daily|7 d[ií]as|siete d[ií]as)", lower) else interval
+            target_limit = 7 if target_interval == "1d" else 672
+            result = run_tool(
+                "query_timeseries",
+                {"symbol": symbol, "interval": target_interval, "limit": target_limit},
+            )
+            if result.ok:
+                candles = result.payload.get("candles", [])
+                last = candles[-1] if candles else {}
+                high = max((c["high"] for c in candles), default=0)
+                low = min((c["low"] for c in candles), default=0)
+                if is_en:
+                    answer = (
+                        f"{result.payload['symbol']} · {target_interval} · {len(candles)} candles (last {target_limit} periods):\n"
+                        f"- Last close: {_money(float(last.get('close', 0)))}\n"
+                        f"- High: {_money(float(high))}\n"
+                        f"- Low: {_money(float(low))}\n"
+                        f"- Source: {result.payload.get('source')}\n"
+                        f"- Cutoff: {result.payload.get('cutoff_time')}"
+                    )
+                else:
+                    answer = (
+                        f"{result.payload['symbol']} · {target_interval} · {len(candles)} velas (últimos {target_limit} períodos):\n"
+                        f"- último close: {_money(float(last.get('close', 0)))}\n"
+                        f"- Máximo: {_money(float(high))}\n"
+                        f"- Mínimo: {_money(float(low))}\n"
+                        f"- Fuente: {result.payload.get('source')}\n"
+                        f"- Corte: {result.payload.get('cutoff_time')}"
+                    )
+            else:
+                answer = "Could not retrieve history." if is_en else "No pude consultar el historial."
             return {
                 "answer": answer,
                 "sql": result.sql,
