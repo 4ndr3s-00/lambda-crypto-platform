@@ -20,6 +20,11 @@ try:
 except ImportError:  # Docker / uvicorn main:app
     from query_service import QueryService, QueryServiceError
 
+try:
+    from .exchange_client import ExchangeUnavailable
+except ImportError:  # Docker / uvicorn main:app
+    from exchange_client import ExchangeUnavailable
+
 WINDOWS = ("1h", "4h", "24h", "7d")
 INTERVALS = ("1m", "5m", "15m", "1h", "4h", "1d", "1D", "7D")
 
@@ -152,7 +157,7 @@ class ToolRegistry:
                 ok=False,
                 error=f"argumentos inválidos: {exc.errors()}",
             )
-        except (QueryServiceError, ValueError) as exc:
+        except (QueryServiceError, ExchangeUnavailable, ValueError) as exc:
             return ToolResult(name=name, arguments=args, ok=False, error=str(exc))
 
     def _catalog(self, args: CatalogArgs) -> ToolResult:

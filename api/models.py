@@ -8,11 +8,12 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 Provenance = Literal["SPEED_LAYER", "BATCH_LAYER", "SERVING_LAYER", "RAG"]
 SourceKind = Literal["rag", "tool", "database"]
-# Indica si la respuesta viene realmente de `serving.ohlcv_reconciled`/`serving.realtime_metrics`
-# (pipeline Kafka -> Spark -> Postgres corriendo) o del generador sintético de
-# `api/market_data.py` (Postgres caído o tablas vacías). Sin este campo, el
-# fallback era indistinguible de un dato real para quien consume la API.
-DataSource = Literal["postgres_reconciled", "exchange_live", "synthetic_fallback"]
+# Indica de dónde viene realmente la respuesta: `serving.ohlcv_reconciled`/
+# `serving.realtime_metrics` (pipeline Kafka -> Spark -> Postgres corriendo),
+# Binance en vivo, o "no_data_available" cuando ninguna fuente real responde.
+# El sistema nunca inventa precios ni métricas: si no hay dato real, el
+# endpoint falla explícitamente (503) en vez de devolver un valor sintético.
+DataSource = Literal["postgres_reconciled", "exchange_live", "no_data_available"]
 
 
 class AssetInfo(BaseModel):
@@ -45,7 +46,7 @@ class OHLCVResponse(BaseModel):
     candles: list[Candle]
     source: str
     provenance: Provenance = "SPEED_LAYER"
-    data_source: DataSource = "synthetic_fallback"
+    data_source: DataSource = "no_data_available"
     watermark: str = "event-time · 2s"
     cutoff_time: str
     is_live: bool = True
@@ -67,7 +68,7 @@ class MetricsResponse(BaseModel):
     low: float
     source: str
     provenance: Provenance = "SPEED_LAYER"
-    data_source: DataSource = "synthetic_fallback"
+    data_source: DataSource = "no_data_available"
     cutoff_time: str
     freshness_seconds: float
     is_live: bool = True
@@ -177,7 +178,7 @@ class PipelineStatusResponse(BaseModel):
     dlq: DLQStatus
     timestamp: str
     freshness_seconds: float
-    data_source: DataSource = "synthetic_fallback"
+    data_source: DataSource = "no_data_available"
 
 
 class HealthServices(BaseModel):
