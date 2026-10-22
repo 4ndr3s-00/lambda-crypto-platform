@@ -327,6 +327,11 @@ def get_rag_status() -> dict[str, Any]:
     return rag_index.status()
 
 
+@app.get("/api/ai/status", tags=["IA"])
+async def ai_status() -> dict[str, Any]:
+    return await llm_service.health()
+
+
 @app.post("/api/rag/reindex", tags=["IA"])
 def reindex_rag(force: bool = Query(default=False)) -> dict[str, Any]:
     try:

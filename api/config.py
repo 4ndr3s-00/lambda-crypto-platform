@@ -18,6 +18,13 @@ def _path_from_env(name: str, default: Path) -> Path:
     return Path(raw).expanduser() if raw else default
 
 
+def _bool_from_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str
@@ -31,6 +38,14 @@ class Settings:
     ollama_base_url: str
     ollama_model: str
     ollama_timeout_seconds: float
+    ollama_embedding_model: str
+    groq_api_key: str
+    groq_base_url: str
+    groq_model: str
+    groq_timeout_seconds: float
+    semantic_router_enabled: bool
+    semantic_router_threshold: float
+    semantic_router_cache_path: Path
     rag_index_path: Path
     rag_docs_dir: Path
     catalog_path: Path
@@ -61,6 +76,16 @@ def get_settings() -> Settings:
         ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         ollama_model=os.getenv("OLLAMA_MODEL", "qwen2.5:3b-instruct"),
         ollama_timeout_seconds=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60")),
+        ollama_embedding_model=os.getenv("OLLAMA_EMBEDDING_MODEL", "bge-m3"),
+        groq_api_key=os.getenv("GROQ_API_KEY", ""),
+        groq_base_url=os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+        groq_model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
+        groq_timeout_seconds=float(os.getenv("GROQ_TIMEOUT_SECONDS", "30")),
+        semantic_router_enabled=_bool_from_env("SEMANTIC_ROUTER_ENABLED", True),
+        semantic_router_threshold=float(os.getenv("SEMANTIC_ROUTER_THRESHOLD", "0.72")),
+        semantic_router_cache_path=_path_from_env(
+            "SEMANTIC_ROUTER_CACHE_PATH", REPO_DIR / "metadata" / "router_embeddings.json"
+        ),
         rag_index_path=_path_from_env("RAG_INDEX_PATH", REPO_DIR / "metadata" / "rag_index.json"),
         rag_docs_dir=docs_dir,
         catalog_path=_path_from_env("CATALOG_PATH", docs_dir / "catalog.json"),
