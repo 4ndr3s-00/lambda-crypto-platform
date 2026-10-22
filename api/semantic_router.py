@@ -219,6 +219,25 @@ OUT_OF_SCOPE_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+GREETING_PATTERNS = re.compile(
+    r"^\s*(hola|buenas|buenos d[i?]as|buenas tardes|buenas noches|"
+    r"hello|hi|hey|good morning|good afternoon|good evening|qu[e?] tal)\b",
+    re.IGNORECASE,
+)
+IDENTITY_PATTERNS = re.compile(
+    r"(qui[e?]n eres|cu[e?]ntame sobre ti|who are you|tell me about yourself|"
+    r"qu[e?] haces|what do you do|para qu[e?] sirves|what can you do)",
+    re.IGNORECASE,
+)
+FAREWELL_PATTERNS = re.compile(
+    r"\b(chao|adi[o?]s|hasta luego|nos vemos|bye|goodbye|see you|hasta ma?ana)\b",
+    re.IGNORECASE,
+)
+THANKS_PATTERNS = re.compile(
+    r"\b(gracias|muchas gracias|te agradezco|thanks|thank you|thanks a lot)\b",
+    re.IGNORECASE,
+)
+
 ANALYTICS_HINTS = re.compile(
     r"(precio|price|m[eé]trica|metric|retorno|return|volumen|volume|vwap|"
     r"vela|candle|gr[aá]fico|chart|tendencia|trend|an[aá]lisis|analysis|"
@@ -407,6 +426,26 @@ class SemanticRouter:
                 "lexical",
                 round((time.perf_counter() - started) * 1000, 2),
             )
+
+        # Short conversational messages are high-confidence even when the
+        # embedding score sits just below the threshold (e.g. "chao" ~0.71).
+        lexical_intents = (
+            (FAREWELL_PATTERNS, "farewell", FAREWELL_ES, FAREWELL_EN),
+            (THANKS_PATTERNS, "thanks", THANKS_ES, THANKS_EN),
+            (IDENTITY_PATTERNS, "identity", GREETING_ES, GREETING_EN),
+            (GREETING_PATTERNS, "greeting", GREETING_ES, GREETING_EN),
+        )
+        for pattern, kind, response_es, response_en in lexical_intents:
+            if pattern.search(message):
+                return RouterDecision(
+                    kind,
+                    kind,
+                    response_en if _looks_english(message) else response_es,
+                    1.0,
+                    "lexical-intent",
+                    "lexical",
+                    round((time.perf_counter() - started) * 1000, 2),
+                )
 
         if not self.enabled:
             return RouterDecision.analytics(backend="disabled")

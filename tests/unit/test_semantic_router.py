@@ -178,3 +178,16 @@ def test_pipeline_query_uses_local_tool_without_groq() -> None:
     assert calls["count"] == 0
     assert response.tool_calls and response.tool_calls[0].name == "query_pipeline_status"
     assert response.source == "serving.pipeline_status"
+
+
+def test_short_farewell_chao_is_lexical() -> None:
+    decision = asyncio.run(router().route("chao"))
+    assert decision.kind == "farewell"
+    assert decision.backend == "lexical"
+    assert "Hasta luego" in (decision.response or "")
+
+
+def test_short_farewell_without_accent_is_lexical() -> None:
+    decision = asyncio.run(router().route("adios"))
+    assert decision.kind == "farewell"
+    assert decision.backend == "lexical"
