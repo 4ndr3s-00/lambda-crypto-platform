@@ -97,10 +97,12 @@ Incluye mercado OHLCV, mÃ©tricas, telemetrÃ­a, dashboard, Qwen2.5 local, RAG
     redoc_url="/redoc",
 )
 
+_settings = get_settings()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=list(_settings.cors_origins),
+    allow_credentials=_settings.cors_origins != ("*",),
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
@@ -110,7 +112,6 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 query_service = QueryService()
-_settings = get_settings()
 rag_index = RagIndex(_settings.rag_index_path, _settings.rag_docs_dir, _settings.glossary_path)
 llm_service = LLMService(query_service, rag_index, _settings)
 app.state.query_service = query_service

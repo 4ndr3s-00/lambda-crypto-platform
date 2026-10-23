@@ -85,7 +85,8 @@ class QueryService:
                 cursor.fetchone()
             connection.close()
             self._pg_available = True
-        except Exception:
+        except Exception as exc:
+            logger.warning("Postgres (%s) no disponible: %s", self.pg_dbname, exc)
             self._pg_available = False
         return self._pg_available
 
@@ -100,8 +101,12 @@ class QueryService:
                 dbname=self.pg_dbname,
                 connect_timeout=3
             )
-        except Exception:
+        except Exception as exc:
             # Fallback a market_platform si serving_db está en migración
+            logger.warning(
+                "No se pudo conectar a '%s', usando fallback 'market_platform': %s",
+                self.pg_dbname, exc,
+            )
             return psycopg2.connect(
                 host=self.pg_host,
                 port=self.pg_port,
