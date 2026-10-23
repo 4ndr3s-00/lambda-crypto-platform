@@ -10,12 +10,14 @@ ENV_FILE = .env
 # SPARK_WORKER_CORES cores y SPARK_WORKER_MEMORY de memoria.
 WORKERS ?= 3
 
-.PHONY: help env up down restart ps logs logs-api logs-kafka logs-spark logs-airflow rag-index test clean scale-spark scale-down
+.PHONY: help env up down restart ps logs logs-api logs-kafka logs-spark logs-airflow rag-index test clean scale-spark scale-down catchup demo
 
 help:
 	@echo "Comandos disponibles:"
 	@echo "  make env           Copia .env.example a .env si no existe"
-	@echo "  make up            Levanta la infraestructura base (Kafka, MinIO, Postgres, Spark, API)"
+	@echo "  make up            Levanta la infraestructura base (Kafka, MinIO, Postgres, Spark, API) y pone al dia el historico (make catchup)"
+	@echo "  make catchup       Trae de Binance solo los dias de historico que falten desde la ultima vez registrada"
+	@echo "  make demo          Fuerza y espera una corrida visible de Batch + reconciliacion para la presentacion"
 	@echo "  make up-metadata   Levanta OpenMetadata y OpenSearch (perfil metadata - US-25)"
 	@echo "  make up-all        Levanta todo el stack incluyendo LLM local (perfil llm)"
 	@echo "  make down          Detiene todos los contenedores"
@@ -35,6 +37,24 @@ env:
 
 up: env
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d --build
+	@$(MAKE) catchup
+
+# Streaming (market-producer, spark-streaming) corre 24/7 por defecto, lo cual
+# no tiene sentido para un proyecto academico que no se demuestra todo el dia.
+# `catchup` cierra ese hueco: antes de cada demo, trae de Binance solo los
+# dias de historico que falten desde la ultima vez registrada (no hace nada
+# si ya esta al dia) y dispara el recalculo batch + la reconciliacion.
+catchup:
+	@echo "Esperando a que Airflow este listo para el catch-up..."
+	@until docker exec lambda-airflow airflow jobs check --job-type SchedulerJob >/dev/null 2>&1; do sleep 3; done
+	docker exec lambda-airflow python3 -m ingestion.catchup_historical
+
+# Para la presentacion en vivo: a diferencia de `catchup` (silencioso, no hace
+# nada si ya esta al dia), esto SIEMPRE dispara y espera una corrida real y
+# visible de Batch + reconciliacion, para poder mostrarle al jurado que
+# funcionan de verdad sin depender de si habia datos nuevos que traer.
+demo:
+	docker exec lambda-airflow python3 -m ingestion.catchup_historical --demo
 
 up-all: env
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) --profile llm up -d --build
