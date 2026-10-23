@@ -97,6 +97,21 @@ def build_spark_session(
     return builder.getOrCreate()
 
 
+def pg_conn_params_from_args(args) -> dict:
+    """
+    Construye el dict de conexión psycopg2 a partir de los argumentos CLI
+    `--postgres-host/-port/-db/-user/-password`, comunes a `serving_reconcile.py`
+    y `streaming_market.py`, para no repetir el mismo literal en cada script.
+    """
+    return {
+        "host": args.postgres_host,
+        "port": args.postgres_port,
+        "dbname": args.postgres_db,
+        "user": args.postgres_user,
+        "password": args.postgres_password,
+    }
+
+
 def lake_path(prefix: str = "", bucket: str = LAKE_BUCKET) -> str:
     """Construye una URI `s3a://` canónica apuntando al Data Lake."""
     base = f"s3a://{bucket}"

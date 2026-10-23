@@ -51,7 +51,7 @@ from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 
-from spark_session import batch_results_path, build_spark_session
+from spark_session import batch_results_path, build_spark_session, pg_conn_params_from_args
 
 # Columna que identifica de forma única una vela dentro del dataset
 # consolidado. La reconciliación se apoya en ella para descartar las filas
@@ -427,13 +427,7 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     intervals = [i.strip() for i in args.intervals.split(",") if i.strip()]
     symbols = [s.strip().upper() for s in args.symbols.split(",")] if args.symbols else None
-    pg_conn_params = {
-        "host": args.postgres_host,
-        "port": args.postgres_port,
-        "dbname": args.postgres_db,
-        "user": args.postgres_user,
-        "password": args.postgres_password,
-    }
+    pg_conn_params = pg_conn_params_from_args(args)
 
     spark = build_spark_session(app_name="serving-reconcile", enable_postgres=True)
 
