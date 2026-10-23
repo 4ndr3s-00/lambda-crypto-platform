@@ -35,7 +35,12 @@ export function toBogota(date: Date): Date {
   return new Date(date.getTime() + BOGOTA_OFFSET_MS);
 }
 
-/** `YYYY-MM-DD HH:MM:SS COT`, used for cutoff timestamps across the console. */
+/** `YYYY-MM-DD HH:MM:SS UTC`, used for data cutoffs (the source stores UTC). */
 export function formatUtcStamp(date: Date): string {
+  return `${date.toISOString().slice(0, 19).replace("T", " ")} UTC`;
+}
+
+/** `YYYY-MM-DD HH:MM:SS COT`, only for intraday wall-clock display. */
+export function formatBogotaStamp(date: Date): string {
   return `${toBogota(date).toISOString().slice(0, 19).replace("T", " ")} COT`;
 }

@@ -64,13 +64,17 @@ function priceDigits(price: number): number {
 }
 
 function axisLabel(iso: string, interval: DashboardInterval): string {
-  const date = toBogota(new Date(iso));
+  const raw = new Date(iso);
+  const date = toBogota(raw);
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
   const hh = String(date.getUTCHours()).padStart(2, "0");
   const mm = String(date.getUTCMinutes()).padStart(2, "0");
   if (interval === "1m" || interval === "5m") return `${hh}:${mm}`;
-  if (interval === "1d") return `${month}-${day}`;
+  if (interval === "1d") {
+    const utc = raw.toISOString().slice(0, 10).split("-");
+    return `${utc[1]}-${utc[2]}`;
+  }
   return `${month}-${day} ${hh}:${mm}`;
 }
 
@@ -83,6 +87,7 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
   const [size, setSize] = useState<Size>({ w: 0, h: 0 });
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [cursor, setCursor] = useState<CursorPoint | null>(null);
+  const [scrollLeft, setScrollLeft] = useState(0);
   const autoScrolled = useRef(false);
   const minCandleWidth = interval === "1d" ? 20 : 7;
   const contentWidth = Math.max(size.w, candles.length * minCandleWidth);
@@ -129,8 +134,13 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
     const node = wrapRef.current;
     if (!node || autoScrolled.current || candles.length === 0) return;
     node.scrollLeft = node.scrollWidth;
+    setScrollLeft(node.scrollLeft);
     autoScrolled.current = true;
   }, [candles.length, interval]);
+
+  const handleScroll = () => {
+    setScrollLeft(wrapRef.current?.scrollLeft ?? 0);
+  };
 
   const { bounds, maxVolume, grid } = useMemo(() => {
     const b = computeBounds(candles);
@@ -191,7 +201,12 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
   }, [cursor]);
 
   return (
-    <div ref={wrapRef} className="relative h-full w-full overflow-x-scroll overscroll-x-contain pb-2 [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-track]:bg-transparent">
+    <div className="flex h-full w-full flex-col">
+      <div
+        ref={wrapRef}
+        onScroll={handleScroll}
+        className="relative min-h-0 flex-1 overflow-x-scroll overscroll-x-contain pb-2 [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-track]:bg-transparent"
+      >
       {size.w > 0 && size.h > 0 && (
         <svg
           width={contentWidth}
@@ -209,13 +224,13 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
               <line
                 x1={plot.left}
                 y1={line.y}
-                x2={size.w - plot.right}
+                x2={contentWidth - plot.right}
                 y2={line.y}
                 stroke="rgba(255,255,255,0.05)"
                 strokeWidth="1"
               />
               <text
-                x={size.w - plot.right + 8}
+                x={contentWidth - plot.right + 8}
                 y={line.y + 3}
                 fill="rgba(255,255,255,0.34)"
                 fontSize="9"
@@ -280,7 +295,7 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
               <line
                 x1={plot.left}
                 y1={priceToY(last.close)}
-                x2={size.w - plot.right}
+                x2={contentWidth - plot.right}
                 y2={priceToY(last.close)}
                 stroke="rgba(255,255,255,0.16)"
                 strokeWidth="1"
@@ -305,7 +320,7 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
               <line
                 x1={plot.left}
                 y1={priceToY(hovered.close)}
-                x2={size.w - plot.right}
+                x2={contentWidth - plot.right}
                 y2={priceToY(hovered.close)}
                 stroke="rgba(255,255,255,0.18)"
                 strokeWidth="1"
@@ -322,7 +337,7 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
                 {axisLabel(candles[0]!.timestamp, interval)}
               </text>
               <text
-                x={size.w - plot.right}
+                x={contentWidth - plot.right}
                 y={size.h - 8}
                 textAnchor="end"
                 fill="rgba(255,255,255,0.3)"
@@ -349,8 +364,11 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
         >
           <div className="mb-1 text-zinc-500">
             {(() => {
+              if (interval === "1d") {
+                return new Date(hovered.timestamp).toISOString().slice(0, 10) + " UTC";
+              }
               const bogota = toBogota(new Date(hovered.timestamp)).toISOString();
-              return interval === "1d" ? bogota.slice(0, 10) + " COT" : bogota.replace("T", " ").slice(0, 19) + " COT";
+              return bogota.replace("T", " ").slice(0, 19) + " COT";
             })()}
           </div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
@@ -373,6 +391,22 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
             <span className="text-right text-zinc-300">{formatCompact(hovered.volume)}</span>
           </div>
         </div>
+      )}
+      </div>
+      {contentWidth > size.w && (
+        <input
+          type="range"
+          min={0}
+          max={Math.max(0, contentWidth - size.w)}
+          value={scrollLeft}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            if (wrapRef.current) wrapRef.current.scrollLeft = next;
+            setScrollLeft(next);
+          }}
+          className="mt-1 h-2 w-full cursor-pointer accent-white/40"
+          aria-label="Desplazar velas horizontalmente"
+        />
       )}
     </div>
   );

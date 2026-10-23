@@ -4,11 +4,11 @@ import asyncio
 from dataclasses import replace
 
 from api.config import get_settings
-from api.llm_service import LLMService
+from api.llm_service import LLMService, _clean_answer_text
 from api.models import ChatRequest
 from api.query_service import QueryService
 from api.rag_indexer import RagIndex
-from api.semantic_router import SemanticRouter
+from api.semantic_router import RouterDecision, SemanticRouter
 
 
 def fake_embed(texts):
@@ -147,6 +147,8 @@ def test_analytics_calls_groq_and_executes_local_tool() -> None:
     assert response.tool_calls and response.tool_calls[0].name == "query_metrics"
     assert "BTCUSDT" in response.answer
     assert response.intent == "analytics"
+    assert response.chart is not None
+    assert len(response.chart.candles) >= 2
 
 
 def test_english_metrics_fallback_uses_real_tool_data() -> None:
@@ -202,3 +204,32 @@ def test_week_history_uses_daily_interval_and_seven_candles() -> None:
     assert tool.arguments["interval"] == "1d"
     assert tool.arguments["limit"] == 7
     assert "7 velas" in result["answer"]
+
+
+def test_clean_answer_removes_markdown_tables_and_bold() -> None:
+    raw = "**Precio**\n\n| Activo | Valor |\n|---|---|\n| BTC | 100 |"
+    cleaned = _clean_answer_text(raw)
+    assert "**" not in cleaned
+    assert "|" not in cleaned
+    assert "Precio" in cleaned
+    assert "BTC" in cleaned
+
+
+def test_rag_guard_does_not_call_groq_without_context() -> None:
+    service = _service()
+    calls = {"count": 0}
+
+    async def fake_groq(*args, **kwargs):
+        calls["count"] += 1
+        return {"choices": [{"message": {"content": "no deber?a"}}]}
+
+    service._run_groq = fake_groq  # type: ignore[method-assign]
+    service.rag_index.query = lambda *args, **kwargs: []  # type: ignore[method-assign]
+
+    async def fake_route(*args, **kwargs):
+        return RouterDecision.analytics()
+
+    service.router.route = fake_route  # type: ignore[method-assign]
+    response = asyncio.run(service.answer(ChatRequest(message="?Qu? es el protocolo Zeta?")))
+    assert calls["count"] == 0
+    assert response.source == "rag_guard"

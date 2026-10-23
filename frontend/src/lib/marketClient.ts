@@ -26,7 +26,7 @@ export const QUICK_PROMPTS: QuickPrompt[] = [
   { label: "Linaje del dataset de velas", query: "¿Cuál es el linaje del dataset de velas OHLCV?" },
 ];
 
-export const MARKET_INTERVALS: MarketInterval[] = ["5m", "15m", "1h", "4h"];
+export const MARKET_INTERVALS: MarketInterval[] = ["5m", "15m", "1h", "4h", "1d"];
 export const DASHBOARD_INTERVALS: DashboardInterval[] = ["1m", "5m", "1h", "1d"];
 
 export function isMarketInterval(value: string | undefined): value is MarketInterval {
@@ -44,7 +44,9 @@ const DASHBOARD_ASSETS: Array<{ symbol: DashboardSymbol; base: string; quote: st
 ];
 
 function pairFor(symbol: string): string {
-  return DASHBOARD_ASSETS.find((asset) => asset.symbol === symbol)?.pair ?? `${symbol}USDT`;
+  const clean = symbol.toUpperCase();
+  if (clean.endsWith("USDT")) return clean;
+  return DASHBOARD_ASSETS.find((asset) => asset.symbol === clean)?.pair ?? `${clean}USDT`;
 }
 
 function summarize(candles: OHLCVCandle[]): { totalVolume: number; priceChangePercent: number; vwap: number } {
@@ -59,7 +61,11 @@ function summarize(candles: OHLCVCandle[]): { totalVolume: number; priceChangePe
 
 /** Refetches a chat data-artifact's series at a different timeframe from Binance. */
 export async function regenerateArtifact(artifact: DataArtifact, interval: MarketInterval): Promise<DataArtifact> {
-  const payload = await fetchOHLCV({ symbol: artifact.symbol, interval, limit: 48 });
+  const payload = await fetchBackendOHLCV({
+    symbol: artifact.symbol,
+    interval,
+    limit: interval === "1d" ? 100 : 48,
+  });
   return {
     ...artifact,
     interval,
@@ -160,33 +166,53 @@ function unavailableAsset(
   };
 }
 
-async function fetchOHLCV(params: { symbol: string; interval: DashboardInterval | MarketInterval; limit: number }): Promise<OHLCVResponse> {
+interface BackendOHLCVResponse {
+  symbol: string;
+  interval: string;
+  candles: OHLCVCandle[];
+  source: string;
+  is_live: boolean;
+  error?: string | null;
+}
+
+async function fetchBackendOHLCV(params: {
+  symbol: string;
+  interval: string;
+  limit: number;
+}): Promise<OHLCVResponse> {
   const pair = pairFor(params.symbol);
   try {
-    const klines = await fetchJson<unknown[][]>(
-      `${BINANCE_REST}/klines?symbol=${pair}&interval=${params.interval}&limit=${params.limit}`,
+    const raw = await fetchJson<BackendOHLCVResponse>(
+      `/api/market/ohlcv?symbol=${encodeURIComponent(pair)}&interval=${encodeURIComponent(params.interval)}&limit=${params.limit}`,
     );
-    const candles: OHLCVCandle[] = klines.map((row) => ({
-      timestamp: new Date(Number(row[0])).toISOString(),
-      open: Number(row[1]),
-      high: Number(row[2]),
-      low: Number(row[3]),
-      close: Number(row[4]),
-      volume: Number(row[5]),
-    }));
-    return { symbol: params.symbol, interval: params.interval, candles, isLive: true, source: EXCHANGE };
+    return {
+      symbol: raw.symbol,
+      interval: raw.interval,
+      candles: raw.candles,
+      isLive: raw.is_live,
+      source: raw.source,
+      error: raw.error ?? undefined,
+    };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Binance no disponible";
     return {
       symbol: params.symbol,
       interval: params.interval,
       candles: [],
       isLive: false,
       source: "unavailable",
-      error: message,
+      error: error instanceof Error ? error.message : "API no disponible",
     };
   }
 }
+
+async function fetchOHLCV(params: { symbol: string; interval: DashboardInterval | MarketInterval; limit: number }): Promise<OHLCVResponse> {
+  return fetchBackendOHLCV({
+    symbol: params.symbol,
+    interval: params.interval,
+    limit: params.limit,
+  });
+}
+
 
 async function fetchOrderBook(symbol: string, depth: number): Promise<OrderBookSnapshot> {
   const pair = pairFor(symbol);
@@ -279,6 +305,16 @@ async function fetchPipelineStatus(): Promise<PipelineStatusResponse> {
   }
 }
 
+interface BackendChatChart {
+  symbol: string;
+  interval: string;
+  candles: OHLCVCandle[];
+  source: string;
+  data_source: string;
+  is_live: boolean;
+  cutoff_time: string;
+}
+
 interface BackendChatResponse {
   answer: string;
   sql: string | null;
@@ -288,6 +324,7 @@ interface BackendChatResponse {
   sources: Array<{ source: string; title?: string | null; snippet?: string | null }>;
   cutoff_time: string;
   disclaimer: string;
+  chart?: BackendChatChart | null;
   latency_ms: number;
 }
 
@@ -297,7 +334,7 @@ function toLayerSource(provenance: string): "SPEED_LAYER" | "BATCH_LAYER" | "REC
   return "RECONCILED";
 }
 
-/** Calls the real serving API (Qwen2.5 + RAG + SQL tools). Fails loudly — never a canned reply. */
+/** Calls the real serving API (Groq + RAG + SQL tools). Fails loudly — never a canned reply. */
 async function postChat({ query }: { query: string }): Promise<{ message: ChatMessage }> {
   const response = await fetch("/api/chat", {
     method: "POST",
@@ -310,18 +347,31 @@ async function postChat({ query }: { query: string }): Promise<{ message: ChatMe
   }
   const payload = (await response.json()) as BackendChatResponse;
   const now = new Date().toISOString();
+  const chart = payload.chart;
+  const dataArtifact: DataArtifact | undefined =
+    chart && chart.candles.length > 0
+      ? {
+          type: "CANDLESTICK",
+          symbol: chart.symbol,
+          interval: chart.interval,
+          data: chart.candles,
+          summary: summarize(chart.candles),
+          isLive: chart.is_live,
+        }
+      : undefined;
 
   const message: ChatMessage = {
     id: `msg_assistant_${Date.now()}`,
     role: "assistant",
     timestamp: now,
     content: payload.answer,
+    dataArtifact,
     sqlInspection: payload.sql
       ? {
           layerSource: toLayerSource(payload.provenance),
           generatedSql: payload.sql,
           sourceDataset: payload.source ?? payload.asset ?? "serving layer",
-          engine: "Qwen2.5 + Serving API",
+          engine: "Groq + Serving API",
           executionTimeMs: Math.round(payload.latency_ms),
           cutoffDate: payload.cutoff_time,
         }

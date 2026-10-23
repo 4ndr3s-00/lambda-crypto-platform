@@ -12,7 +12,7 @@ import httpx
 
 try:
     from .config import DISCLAIMER, Settings, get_settings
-    from .models import ChatRequest, ChatResponse, SourceReference, ToolCallRecord
+    from .models import ChatChart, ChatRequest, ChatResponse, SourceReference, ToolCallRecord
     from .query_service import QueryService
     from .rag_indexer import RagHit, RagIndex
     from .semantic_router import ANALYTICS_HINTS, RouterDecision, SemanticRouter, _looks_english
@@ -20,7 +20,7 @@ try:
     from .tools import TOOL_SPECS, ToolRegistry, ToolResult
 except ImportError:  # Docker / uvicorn main:app
     from config import DISCLAIMER, Settings, get_settings
-    from models import ChatRequest, ChatResponse, SourceReference, ToolCallRecord
+    from models import ChatChart, ChatRequest, ChatResponse, SourceReference, ToolCallRecord
     from query_service import QueryService
     from rag_indexer import RagHit, RagIndex
     from semantic_router import ANALYTICS_HINTS, RouterDecision, SemanticRouter, _looks_english
@@ -31,15 +31,16 @@ LOGGER = logging.getLogger("iq_analyzer.llm")
 
 SYSTEM_PROMPT = """<system_prompt>
 <role>
-Eres el Asistente Analítico Oficial de "IQ Analyzer". Estás conectado directamente a la base de datos y al contexto operativo del sistema. Tu objetivo es responder consultas en lenguaje natural, realizar análisis profundos, ejecutar comparaciones y entregar respuestas precisas basadas estrictamente en los datos proporcionados, integrándote con el sistema de gráficos y reportes de la plataforma.
+Eres el Asistente Analítico Oficial de IQ Analyzer. Estás conectado a la base de datos, al contexto RAG y a las herramientas de solo lectura del sistema.
 </role>
 <directives>
-1. NATURALIDAD Y PRECISIÓN: Responde de forma natural, clara, ejecutiva y amable. Si el usuario solicita una consulta, análisis o comparación de datos, procésala utilizando el contexto de la base de datos inyectado.
-2. SOPORTE BILINGÜE NATIVO: Detecta automáticamente el idioma del usuario (Español o Inglés) y responde en ese mismo idioma con total fluidez.
-3. CERO ALUCINACIONES: Basa tus respuestas numéricas, comparativas y conclusiones exclusivamente en los datos reales provenientes de la base de datos o el contexto RAG.
-4. GUARDRAIL ESTRICTO DE DOMINIO: Si llega una pregunta de cultura general, personajes históricos, temas triviales o solicitudes sin relación con IQ Analyzer, TIENES PROHIBIDO responderla o inventar una consulta. Responde únicamente: "Disculpa, no cuento con información sobre ese tema. Soy el asistente de IQ Analyzer y estoy diseñado exclusivamente para ayudarte con consultas, análisis y comparaciones de los datos de tu sistema. ¿Qué métrica o reporte te gustaría revisar?"
-5. HERRAMIENTAS: Para cifras de mercado usa get_catalog_metadata, query_metrics o query_timeseries antes de responder. No inventes números ni SQL. El SQL que muestres es solo trazabilidad de la herramienta.
-6. FUENTES: Cita las fuentes RAG entre corchetes cuando uses contexto documental.
+1. Responde en texto plano, natural y breve. No uses Markdown: nada de **, __, backticks, encabezados, tablas dibujadas a mano ni bloques de código.
+2. Si necesitas enumerar, usa líneas simples que empiecen con "- ".
+3. Responde en el idioma del usuario, español o inglés.
+4. Para cifras de mercado usa get_catalog_metadata, query_metrics o query_timeseries antes de responder. Nunca inventes números ni SQL.
+5. Basa conclusiones solo en los datos de las herramientas o en el contexto RAG. Si no hay contexto suficiente, dilo claramente; no inventes.
+6. Si la pregunta es de cultura general o fuera de IQ Analyzer, responde con el guardrail de dominio y no consultes la base de datos.
+7. No repitas el SQL ni el JSON de las herramientas en la respuesta; el sistema ya muestra la trazabilidad por separado.
 </directives>
 </system_prompt>"""
 
@@ -58,6 +59,28 @@ def _strip_code_fence(text: str) -> str:
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
         cleaned = re.sub(r"\s*```$", "", cleaned)
     return cleaned.strip()
+
+
+def _clean_answer_text(text: str) -> str:
+    """Remove Markdown artifacts so the UI receives clean prose."""
+    cleaned = text.strip()
+    cleaned = re.sub(r"```.*?```", "", cleaned, flags=re.DOTALL)
+    cleaned = cleaned.replace("**", "").replace("__", "").replace("`", "")
+    lines: list[str] = []
+    for raw_line in cleaned.splitlines():
+        line = raw_line.strip()
+        if re.fullmatch(r"\|?[\s:|-]+\|?", line):
+            continue
+        if line.count("|") >= 2:
+            cells = [cell.strip() for cell in line.strip("|").split("|") if cell.strip()]
+            line = " · ".join(cells)
+        line = re.sub(r"^#{1,6}\s*", "", line)
+        if line.startswith("* "):
+            line = "- " + line[2:]
+        lines.append(line)
+    cleaned = "\n".join(lines)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
 
 
 def _parse_model_json(text: str) -> dict[str, Any] | None:
@@ -176,9 +199,29 @@ class LLMService:
         except Exception as exc:  # noqa: BLE001 - RAG is best-effort
             LOGGER.warning("RAG query failed: %s", exc)
 
+        if not rag_hits and not ANALYTICS_HINTS.search(message):
+            return ChatResponse(
+                answer=(
+                    "No tengo información suficiente en la base documental para responder eso. "
+                    "Puedo ayudarte con métricas, velas, comparaciones, catálogo o estado del pipeline de IQ Analyzer."
+                ),
+                sql=None,
+                provenance="RAG",
+                asset=None,
+                source="rag_guard",
+                sources=[],
+                cutoff_time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                disclaimer=DISCLAIMER,
+                tool_calls=[],
+                rag_used=False,
+                intent="rag_guard",
+                router_score=decision.score,
+                latency_ms=round((time.perf_counter() - started) * 1000, 2),
+            )
+
         model_result: dict[str, Any] | None = None
         pipeline_query = re.search(
-            r"\b(pipeline|kafka|spark|airflow|minio|dlq|lag|salud|estado|status|health)\b",
+            r"\b(pipeline|dlq|lag|salud|estado|status|health|consumer)\b",
             message,
             re.IGNORECASE,
         )
@@ -241,9 +284,55 @@ class LLMService:
         )
         source = next((result.source for result in tool_results if result.source), None)
 
+        chart: ChatChart | None = None
+        metrics_result = next(
+            (result for result in tool_results if result.name == "query_metrics" and result.ok),
+            None,
+        )
+        if metrics_result is not None:
+            metrics_payload = metrics_result.payload
+            metrics_symbol = str(metrics_payload.get("symbol") or symbol)
+            metrics_window = str(metrics_payload.get("window") or "24h")
+            chart_interval = "1h" if metrics_window in {"24h", "7d"} else "15m"
+            chart_limit = 168 if metrics_window == "7d" else 24 if metrics_window == "24h" else 4
+            try:
+                chart_payload = self.query_service.get_market_ohlcv(
+                    metrics_symbol, interval=chart_interval, limit=chart_limit
+                )
+                chart_candles = chart_payload.get("candles", [])
+                if chart_candles:
+                    chart = ChatChart(
+                        symbol=metrics_symbol,
+                        interval=chart_interval,
+                        candles=chart_candles,
+                        source=str(chart_payload.get("source") or ""),
+                        data_source=str(chart_payload.get("data_source") or "no_data_available"),
+                        is_live=bool(chart_payload.get("is_live", True)),
+                        cutoff_time=str(chart_payload.get("cutoff_time") or ""),
+                    )
+            except Exception as exc:  # noqa: BLE001 - chart is best-effort
+                LOGGER.warning("No se pudo construir chart de m?tricas: %s", exc)
+
+        for result in tool_results:
+            if result.name == "query_timeseries" and result.ok:
+                payload = result.payload
+                candles = payload.get("candles", [])
+                if candles:
+                    chart = ChatChart(
+                        symbol=str(payload.get("symbol") or symbol),
+                        interval=str(payload.get("interval") or interval),
+                        candles=candles,
+                        source=str(payload.get("source") or ""),
+                        data_source=str(payload.get("data_source") or "no_data_available"),
+                        is_live=bool(payload.get("is_live", True)),
+                        cutoff_time=str(payload.get("cutoff_time") or ""),
+                    )
+                break
+
         sources = self._merge_sources(rag_hits, tool_results)
         if source is None and sources:
             source = sources[0].source
+        answer_text = _clean_answer_text(answer_text)
         answer_text = self._ensure_disclaimer(answer_text)
         provenance = self._normalize_provenance(provenance, tool_results)
 
@@ -260,6 +349,7 @@ class LLMService:
             rag_used=bool(rag_hits),
             intent=decision.intent,
             router_score=decision.score,
+            chart=chart,
             latency_ms=round((time.perf_counter() - started) * 1000, 2),
         )
 
@@ -636,7 +726,7 @@ class LLMService:
                 "tool_records": tool_records,
             }
 
-        if re.search(r"\b(pipeline|kafka|spark|airflow|minio|dlq|lag|salud|estado|status|health)\b", lower):
+        if re.search(r"\b(pipeline|dlq|lag|salud|estado|status|health|consumer)\b", lower):
             status = self.query_service.get_market_pipeline_status()
             tool_results.append(
                 ToolResult(
