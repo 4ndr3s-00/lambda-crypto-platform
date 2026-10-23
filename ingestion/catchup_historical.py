@@ -25,6 +25,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from datetime import date, timedelta
 
 import boto3
@@ -104,6 +105,37 @@ def _trigger_dag(dag_id: str, conf: dict | None = None) -> None:
     if conf:
         cmd += ["--conf", json.dumps(conf)]
     subprocess.run(cmd, check=False)
+
+
+def _trigger_dag_and_wait(dag_id: str, conf: dict | None = None, timeout_s: int = 180) -> bool:
+    """Dispara el DAG y espera a que termine (para una demo en vivo con resultado claro)."""
+    cmd = ["airflow", "dags", "trigger", dag_id]
+    if conf:
+        cmd += ["--conf", json.dumps(conf)]
+    subprocess.run(cmd, check=False, capture_output=True, text=True)
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        check = subprocess.run(
+            ["airflow", "dags", "list-runs", "-d", dag_id, "--output", "json"],
+            check=False, capture_output=True, text=True,
+        )
+        try:
+            runs = json.loads(check.stdout)
+        except json.JSONDecodeError:
+            runs = []
+        if runs:
+            # `execution_date` siempre tiene valor desde el momento del trigger
+            # (a diferencia de `start_date`, que queda vacío mientras está en
+            # cola) — por eso se usa para identificar la corrida más reciente.
+            latest = max(runs, key=lambda r: r.get("execution_date") or "")
+            state = latest.get("state")
+            if state == "success":
+                return True
+            if state == "failed":
+                return False
+        time.sleep(3)
+    logger.warning("%s no terminó dentro de %ds (timeout).", dag_id, timeout_s)
+    return False
 
 
 def _prune_s3_prefix(s3, prefix: str, cutoff: date) -> int:
@@ -214,5 +246,46 @@ def main() -> int:
     return 0
 
 
+def demo() -> int:
+    """
+    Corrida de demostración para una presentación en vivo: sin importar si el
+    histórico ya está al día, re-dispara `batch_recompute` y
+    `serving_reconcile` para el último día ya registrado y ESPERA a que
+    terminen, para poder mostrarle al público un resultado (éxito/fallo)
+    inmediato en vez de un trigger silencioso en segundo plano.
+    """
+    s3 = _s3_client()
+    try:
+        last = _last_registered_date(s3)
+    except ClientError as exc:
+        logger.error("No se pudo listar MinIO (¿está levantado?): %s", exc)
+        return 1
+
+    if last is None:
+        logger.error("No hay ningún día registrado todavía — corre 'make catchup' primero.")
+        return 1
+
+    print(f"\n=== Demo: reprocesando {last} (Batch + reconciliación) ===\n")
+
+    print(f"-> Disparando batch_recompute para {last}...")
+    ok_batch = _trigger_dag_and_wait(
+        "batch_recompute", {"start_date": last.isoformat(), "end_date": last.isoformat()}, timeout_s=180,
+    )
+    print(f"   batch_recompute: {'OK' if ok_batch else 'FALLÓ o no terminó a tiempo'}")
+
+    print("-> Disparando serving_reconcile...")
+    ok_reconcile = _trigger_dag_and_wait("serving_reconcile", timeout_s=180)
+    print(f"   serving_reconcile: {'OK' if ok_reconcile else 'FALLÓ o no terminó a tiempo'}")
+
+    print("\n=== Verificá el resultado ===")
+    print("  UI de Airflow:  http://localhost:8085  (DAGs: batch_recompute, serving_reconcile)")
+    print(f"  API:            curl 'http://localhost:8000/api/ohlcv?symbol=BTCUSDT&interval=1d&limit=3'")
+    print("  (busca \"source_layer\": \"batch\" y \"updated_at\" con la hora de ahora)\n")
+
+    return 0 if (ok_batch and ok_reconcile) else 1
+
+
 if __name__ == "__main__":
+    if "--demo" in sys.argv:
+        sys.exit(demo())
     sys.exit(main())

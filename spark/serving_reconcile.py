@@ -44,6 +44,7 @@ resultado consolidado tenga exactamente una fila por vela.
 import argparse
 import os
 import sys
+from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -287,13 +288,19 @@ _BATCH_OHLCV_SCHEMA = T.StructType([
 ])
 
 
-def read_batch_ohlcv(spark, interval: str, symbols: list = None) -> DataFrame:
+def read_batch_ohlcv(spark, interval: str, symbols: list = None, min_date=None) -> DataFrame:
     """
     Lee las velas consolidadas por la capa Batch (US-11) para un `interval` dado.
 
     `batch_historical.py` escribe todas las granularidades juntas bajo
     `batch-results/metric=ohlcv` (particionado solo por `date`), con `interval`
     como columna de datos, no de partición — por eso se filtra en memoria.
+
+    `min_date`, si se da, filtra por la partición `date` (poda de particiones,
+    Spark no lee los archivos descartados): las fechas ya consolidadas y
+    reconciliadas en una corrida anterior no cambian nunca, así que no hace
+    falta releerlas ni reescribirlas en cada corrida — solo la ventana
+    reciente donde Batch y Speed realmente se solapan.
 
     Si todavía no existe ningún Parquet (Batch nunca corrió, o corrió sin
     datos en el rango pedido), se devuelve un DataFrame vacío con el esquema
@@ -307,6 +314,9 @@ def read_batch_ohlcv(spark, interval: str, symbols: list = None) -> DataFrame:
         df = spark.read.parquet(path)
     except Exception:  # noqa: BLE001 — Parquet sin archivos: schema no inferible.
         return spark.createDataFrame([], _BATCH_OHLCV_SCHEMA)
+
+    if min_date is not None:
+        df = df.filter(F.col("date") >= F.lit(min_date))
 
     seconds = INTERVAL_SECONDS.get(interval, 300)
     df = (
@@ -444,6 +454,14 @@ def parse_args(argv=None) -> argparse.Namespace:
     )
     parser.add_argument("--intervals", type=str, default="1m,5m,15m,1h,1d")
     parser.add_argument("--symbols", type=str, default=None, help="Lista separada por comas, ej. BTCUSDT,ETHUSDT")
+    parser.add_argument(
+        "--lookback-days", type=int, default=int(os.environ.get("RECONCILE_LOOKBACK_DAYS", "2")),
+        help=(
+            "Solo relee/reescribe Batch de los últimos N días (poda de particiones); "
+            "los días ya consolidados en corridas anteriores no cambian y no hace falta "
+            "releerlos en cada corrida de 5 minutos."
+        ),
+    )
     parser.add_argument("--postgres-host", type=str, default=os.environ.get("POSTGRES_HOST", "postgres"))
     parser.add_argument("--postgres-port", type=str, default=os.environ.get("POSTGRES_PORT", "5432"))
     parser.add_argument(
@@ -466,13 +484,14 @@ def main(argv=None) -> int:
     intervals = [i.strip() for i in args.intervals.split(",") if i.strip()]
     symbols = [s.strip().upper() for s in args.symbols.split(",")] if args.symbols else None
     pg_conn_params = pg_conn_params_from_args(args)
+    min_date = date.today() - timedelta(days=args.lookback_days) if args.lookback_days >= 0 else None
 
     spark = build_spark_session(app_name="serving-reconcile", enable_postgres=True)
 
     total_written = 0
     for interval in intervals:
         try:
-            batch_df = read_batch_ohlcv(spark, interval, symbols)
+            batch_df = read_batch_ohlcv(spark, interval, symbols, min_date=min_date)
         except Exception as exc:  # noqa: BLE001
             print(f"⚠️  Sin datos Batch para interval={interval}: {exc}")
             continue
