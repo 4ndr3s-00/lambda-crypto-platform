@@ -69,6 +69,14 @@ SOURCE_SPEED = "speed"
 EPOCH_CUTOFF = "TIMESTAMP '1970-01-01 00:00:00'"
 
 # Nombre de la columna auxiliar que transporta el corte durante el cruce.
+#
+# `cutoff_frame` (ver `resolve_cutoff`) siempre tiene exactamente una fila, así
+# que cada `.crossJoin(cutoff_frame)` de este módulo es solo la forma de Spark
+# de "pegarle" ese único valor escalar a todas las filas de `batch_df`/
+# `speed_df` para poder filtrar contra él — no es un producto cartesiano real
+# entre dos tablas grandes. Si `cutoff_frame` llegara a tener más de una fila,
+# el cruce multiplicaría filas por error; por eso nunca se construye a mano,
+# solo a través de `resolve_cutoff()`.
 _CUTOFF_COLUMN = "__batch_cutoff__"
 
 

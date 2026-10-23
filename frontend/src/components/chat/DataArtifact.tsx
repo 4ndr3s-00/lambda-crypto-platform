@@ -61,6 +61,8 @@ function priceToY(price: number, bounds: Bounds): number {
 
 function volumeToHeight(volume: number, maxVolume: number): number {
   if (maxVolume <= 0) return 0;
+  // Mínimo de 1px: una vela con volumen muy bajo frente al máximo de la
+  // ventana no debe desaparecer del todo — sigue siendo visible y clicable.
   return Math.max(1, (volume / maxVolume) * VOL_HEIGHT);
 }
 
