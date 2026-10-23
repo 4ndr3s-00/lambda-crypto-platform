@@ -3,7 +3,7 @@ export type ViewMode = "CHAT_CONSOLE" | "STREAMING_DASHBOARD";
 export type DashboardInterval = "1m" | "5m" | "1h" | "1d";
 export type DashboardSymbol = "BTC" | "ETH" | "SOL" | "BNB";
 
-export type MarketInterval = "5m" | "15m" | "1h" | "4h";
+export type MarketInterval = "5m" | "15m" | "1h" | "4h" | "1d";
 
 export interface OHLCVCandle {
   timestamp: string;

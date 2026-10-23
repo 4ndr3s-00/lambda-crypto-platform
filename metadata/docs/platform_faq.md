@@ -4,7 +4,7 @@
 La capa Batch recalcula velas OHLCV y métricas históricas completas sobre Parquet en MinIO usando Spark Batch, orquestado por Airflow. Es idempotente y puede reprocesar correcciones de la fuente sin duplicar filas.
 
 ## ¿Qué calcula la capa Speed?
-La capa Speed consume `market.events` desde Kafka con Spark Structured Streaming, aplica ventanas por event-time, watermark de 5 segundos y deduplicación. Publica métricas recientes para el Serving Layer y deriva eventos inválidos a la DLQ.
+La capa Speed consume `market.events` desde Kafka con Spark Structured Streaming, aplica ventanas por event-time, watermark de 2 minutos y deduplicación. Publica métricas recientes para el Serving Layer y deriva eventos inválidos a la DLQ.
 
 ## ¿Cómo se calcula el retorno?
 El retorno porcentual de una ventana es `(close_final - open_inicial) / open_inicial * 100`. Se calcula sobre velas reconciliadas por event-time. El VWAP se calcula como `sum(precio_típico * volumen) / sum(volumen)`.
