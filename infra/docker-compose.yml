@@ -151,6 +151,10 @@
       - "${SPARK_MASTER_WEBUI_PORT:-8080}:8080"
     volumes:
       - ../spark:/opt/bitnami/spark/jobs:ro
+      # Repo completo de solo lectura para poder correr `pytest tests` dentro
+      # del contenedor (pytest.ini espera `api/`, `ingestion/`, etc. como
+      # hermanos de `tests/`, no solo `spark/jobs/`).
+      - ..:/opt/bitnami/spark/repo:ro
       - spark_data:/bitnami/spark
     healthcheck:
       test: ["CMD", "/opt/bitnami/python/bin/python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080').read()"]

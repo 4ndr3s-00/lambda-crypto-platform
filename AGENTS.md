@@ -147,8 +147,9 @@ confirmarlos:
 ```bash
 # Tests (44 en total)
 docker exec lambda-spark-master bash -c '
-  pip install --no-cache-dir -r /opt/bitnami/spark/jobs/tests/requirements.txt &&
-  cd /opt/bitnami/spark/jobs && python -m pytest tests -v'
+  pip install --no-cache-dir -r /opt/bitnami/spark/repo/tests/requirements.txt &&
+  cd /opt/bitnami/spark/repo &&
+  PYTHONPATH=/opt/bitnami/spark/repo:/opt/bitnami/spark/python python -m pytest tests -v'
 
 # Job real contra MinIO (ver §4)
 ```
@@ -197,8 +198,9 @@ código está en GitHub y todo lo demás se reconstruye.
 ```bash
 # 1. Pruebas (44 en total, no requieren el clúster en marcha)
 docker exec lambda-spark-master bash -c '
-  pip install --no-cache-dir -r /opt/bitnami/spark/jobs/tests/requirements.txt &&
-  cd /opt/bitnami/spark/jobs && python -m pytest tests -v'
+  pip install --no-cache-dir -r /opt/bitnami/spark/repo/tests/requirements.txt &&
+  cd /opt/bitnami/spark/repo &&
+  PYTHONPATH=/opt/bitnami/spark/repo:/opt/bitnami/spark/python python -m pytest tests -v'
 
 # 2. Ejecución real del job contra MinIO
 docker exec lambda-spark-master bash -c '
