@@ -391,6 +391,9 @@
       RAG_DOCS_DIR: /app/metadata
       CATALOG_PATH: /app/metadata/catalog.json
       GLOSSARY_PATH: /app/metadata/glossary.json
+      API_SECURITY_ENABLED: ${API_SECURITY_ENABLED:-true}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
