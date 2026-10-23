@@ -49,6 +49,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
+from pyspark.sql import types as T
 from pyspark.sql.window import Window
 
 from spark_session import batch_results_path, build_spark_session, pg_conn_params_from_args
@@ -265,6 +266,21 @@ def _jdbc_options(pg_conn_params: dict) -> dict:
     }
 
 
+_BATCH_OHLCV_SCHEMA = T.StructType([
+    T.StructField("symbol", T.StringType()),
+    T.StructField("interval", T.StringType()),
+    T.StructField("bucket_start", T.TimestampType()),
+    T.StructField("bucket_end", T.TimestampType()),
+    T.StructField("open", T.DoubleType()),
+    T.StructField("high", T.DoubleType()),
+    T.StructField("low", T.DoubleType()),
+    T.StructField("close", T.DoubleType()),
+    T.StructField("volume", T.DoubleType()),
+    T.StructField("trades_count", T.LongType()),
+    T.StructField("event_time", T.TimestampType()),
+])
+
+
 def read_batch_ohlcv(spark, interval: str, symbols: list = None) -> DataFrame:
     """
     Lee las velas consolidadas por la capa Batch (US-11) para un `interval` dado.
@@ -272,11 +288,22 @@ def read_batch_ohlcv(spark, interval: str, symbols: list = None) -> DataFrame:
     `batch_historical.py` escribe todas las granularidades juntas bajo
     `batch-results/metric=ohlcv` (particionado solo por `date`), con `interval`
     como columna de datos, no de partición — por eso se filtra en memoria.
+
+    Si todavía no existe ningún Parquet (Batch nunca corrió, o corrió sin
+    datos en el rango pedido), se devuelve un DataFrame vacío con el esquema
+    esperado en vez de propagar la excepción: `resolve_cutoff()` ya sabe
+    tratar un Batch vacío como "todo Speed es provisional" (decisión de
+    diseño #3), así que la reconciliación no debe saltarse el intervalo
+    completo solo porque la capa Batch aún no escribió nada.
     """
     path = batch_results_path("ohlcv")
+    try:
+        df = spark.read.parquet(path)
+    except Exception:  # noqa: BLE001 — Parquet sin archivos: schema no inferible.
+        return spark.createDataFrame([], _BATCH_OHLCV_SCHEMA)
+
     df = (
-        spark.read.parquet(path)
-        .filter(F.col("interval") == interval)
+        df.filter(F.col("interval") == interval)
         .withColumn("event_time", F.col("bucket_start"))
         .withColumn("trades_count", F.coalesce(F.col("trades_count"), F.lit(0)))
     )
