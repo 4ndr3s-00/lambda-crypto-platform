@@ -36,9 +36,7 @@ try:  # package imports (pytest -m api.main)
         MetricsResponse as MarketMetricsResponse,
         MarketOverviewResponse,
         OHLCVResponse as MarketOHLCVResponse,
-        OrderBookResponse as MarketOrderBookResponse,
         PipelineStatusResponse as MarketPipelineStatusResponse,
-        TradesResponse as MarketTradesResponse,
     )
     from .query_service import QueryService
     from .rag_indexer import RagIndex, build_default_index
@@ -61,9 +59,7 @@ except ImportError:  # Docker / uvicorn main:app
         MetricsResponse as MarketMetricsResponse,
         MarketOverviewResponse,
         OHLCVResponse as MarketOHLCVResponse,
-        OrderBookResponse as MarketOrderBookResponse,
         PipelineStatusResponse as MarketPipelineStatusResponse,
-        TradesResponse as MarketTradesResponse,
     )
     from query_service import QueryService
     from rag_indexer import RagIndex, build_default_index
@@ -294,34 +290,6 @@ def get_market_metrics(
 def get_market_overview() -> MarketOverviewResponse:
     payload = query_service.get_market_overview()
     return MarketOverviewResponse.model_validate(payload)
-
-
-@app.get("/api/market/orderbook", response_model=MarketOrderBookResponse, tags=["Dashboard"])
-def get_market_orderbook(
-    symbol: str = Query(default="BTCUSDT"),
-    limit: int = Query(default=20, ge=5, le=100),
-) -> MarketOrderBookResponse:
-    try:
-        payload = query_service.get_market_orderbook(symbol, limit)
-        return MarketOrderBookResponse.model_validate(payload)
-    except ExchangeUnavailable as exc:
-        raise HTTPException(status_code=503, detail=f"exchange no disponible: {exc}") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@app.get("/api/market/trades", response_model=MarketTradesResponse, tags=["Dashboard"])
-def get_market_trades(
-    symbol: str = Query(default="BTCUSDT"),
-    limit: int = Query(default=50, ge=1, le=500),
-) -> MarketTradesResponse:
-    try:
-        payload = query_service.get_market_trades(symbol, limit)
-        return MarketTradesResponse.model_validate(payload)
-    except ExchangeUnavailable as exc:
-        raise HTTPException(status_code=503, detail=f"exchange no disponible: {exc}") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/api/market/pipeline", response_model=MarketPipelineStatusResponse, tags=["Dashboard"])

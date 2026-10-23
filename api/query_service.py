@@ -606,14 +606,6 @@ class QueryService:
                 "errors": [str(exc)],
             }
 
-    def get_market_orderbook(self, symbol: str, limit: int = 20) -> Dict[str, Any]:
-        clean_symbol = sanitize_symbol(symbol)
-        return exchange_client.fetch_depth(clean_symbol, limit)
-
-    def get_market_trades(self, symbol: str, limit: int = 50) -> Dict[str, Any]:
-        clean_symbol = sanitize_symbol(symbol)
-        return exchange_client.fetch_trades(clean_symbol, limit)
-
     def get_market_pipeline_status(self) -> Dict[str, Any]:
         """
         Telemetría real del pipeline. Sin componentes persistidos en
