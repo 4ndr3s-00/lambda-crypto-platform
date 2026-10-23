@@ -146,6 +146,17 @@
       - AWS_SECRET_ACCESS_KEY=${SPARK_MINIO_PASSWORD:-spark_secure_lake_pass123}
       - AWS_REGION=us-east-1
       - S3_ENDPOINT=http://minio:9000
+      # Para `pytest tests` dentro del contenedor (AGENTS.md §4): el host de
+      # Postgres es siempre el nombre del servicio Docker, no configurable.
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres_secure_pass}
+      - POSTGRES_DB=${POSTGRES_DB:-market_platform}
+      - SERVING_DB_NAME=${SERVING_DB_NAME:-serving_db}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-}
+      - API_SECURITY_ENABLED=${API_SECURITY_ENABLED:-true}
     ports:
       - "${SPARK_MASTER_PORT:-7077}:7077"
       - "${SPARK_MASTER_WEBUI_PORT:-8080}:8080"
