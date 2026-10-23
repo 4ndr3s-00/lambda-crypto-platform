@@ -73,7 +73,7 @@ de Aceptación en BDD** y una **lista de tareas técnicas** marcadas con `- [ ]`
 | DAG de recálculo batch | `dags/batch_recompute.py` | ✅ `airflow dags test` → success |
 | Fix de IAM para traversal S3A | `infra/minio/` | ✅ Verificado |
 | Escalado del clúster a N workers | `infra/docker-compose.scale.yml` | ✅ 3 workers, 6 cores |
-| Guía de continuidad | `docs/CONTINUIDAD.md` | ✅ |
+| Guía de continuidad | `documentacion/CONTINUIDAD.md` | ✅ |
 
 ### Commits de la rama
 

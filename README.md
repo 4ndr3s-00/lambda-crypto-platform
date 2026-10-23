@@ -63,7 +63,7 @@ La arquitectura Medallion (Bronze/Silver/Gold) es un patrón alternativo centrad
 3. **Reconciliación en Serving**: La capa de servicio resuelve colisiones y solapamientos con base en marcas temporales de evento (*event-time*), no por hora de llegada.
 
 > **¿Retomas el trabajo en otra máquina?** Consulta la
-> [guía de continuidad](docs/CONTINUIDAD.md): explica qué se conserva, qué se
+> [guía de continuidad](documentacion/CONTINUIDAD.md): explica qué se conserva, qué se
 > reconstruye y los pasos exactos para dejar la plataforma operativa de nuevo.
 
 ---
@@ -108,7 +108,7 @@ lambda-crypto-platform/
 │   ├── integration/                 # Pruebas de integración MinIO/Kafka/Postgres
 │   ├── load/                        # Generador sintético de estrés (millones de eventos)
 │   └── requirements.txt             # Dependencias de las pruebas
-├── docs/                            # Documentación operativa
+├── documentacion/                   # Documentación operativa y de continuidad
 │   └── CONTINUIDAD.md               # Guía de traspaso entre máquinas
 ├── AGENTS.md                        # Contexto del proyecto para asistentes de IA
 ├── Makefile                         # Comandos rápidos de operación (make up, make down)
