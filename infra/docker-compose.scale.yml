@@ -1,0 +1,41 @@
+# ==============================================================================
+# Override de Docker Compose para escalar el clúster Spark (Batch & Speed)
+# ==============================================================================
+# Este archivo NO se usa por defecto: `make up` sigue levantando un único
+# worker, igual que hasta ahora. Se aplica de forma explícita para añadir
+# capacidad al clúster:
+#
+#     docker compose -f infra/docker-compose.yml \
+#                    -f infra/docker-compose.scale.yml \
+#                    --env-file .env up -d --scale spark-worker=3
+#
+# o, más cómodo, con el atajo del Makefile:
+#
+#     make scale-spark WORKERS=3
+#
+# Por qué hace falta un override
+# -----------------------------
+# El servicio `spark-worker` declara un `container_name` fijo y un puerto de
+# host único. Docker exige que cada contenedor tenga un nombre distinto, así
+# que con esa definición `--scale` no puede crear más de una réplica:
+#
+#     WARNING: The "spark-worker" service is using the custom container name
+#     "lambda-spark-worker". Docker requires each container to have a unique
+#     name. Remove the custom name to scale the service
+#
+# `!reset` elimina el `container_name` heredado y `!override` sustituye el
+# mapeo de puertos por un rango, de modo que cada réplica publique su propia
+# Web UI en un puerto distinto (8081, 8082, 8083...) sin entrar en conflicto.
+#
+# Se conserva un único puerto publicado por réplica para poder consultar la
+# Web UI de cada worker; las réplicas adicionales quedan accesibles por igual
+# dentro de la red `lambda-platform-network`.
+# ==============================================================================
+services:
+  spark-worker:
+    # Nombre único por réplica: imprescindible para poder escalar.
+    container_name: !reset null
+
+    # Rango de puertos de host para las Web UI de los workers.
+    ports: !override
+      - "${SPARK_WORKER_WEBUI_PORT:-8081}-${SPARK_WORKER_WEBUI_PORT_MAX:-8084}:8081"

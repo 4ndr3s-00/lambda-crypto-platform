@@ -1,0 +1,100 @@
+{
+  "valid": [
+    {
+      "event_id": "binance_BTCUSDT_1710500000000",
+      "source": "binance_ws",
+      "exchange": "binance",
+      "symbol": "BTCUSDT",
+      "event_time": "2026-10-19T12:00:00.000Z",
+      "ingestion_time": "2026-10-19T12:00:00.045Z",
+      "price": 68450.50,
+      "quantity": 0.4520,
+      "trade_id": "98421045",
+      "interval": "trade",
+      "schema_version": "2.0.0"
+    },
+    {
+      "event_id": "coingecko_ETHUSDT_1710500060000",
+      "source": "coingecko_rest",
+      "exchange": "coingecko",
+      "symbol": "ETHUSDT",
+      "event_time": "2026-10-19T12:01:00.000Z",
+      "ingestion_time": "2026-10-19T12:01:00.512Z",
+      "price": 3450.10,
+      "quantity": 0,
+      "trade_id": null,
+      "interval": "1m",
+      "schema_version": "2.0.0"
+    }
+  ],
+  "invalid": [
+    {
+      "case": "falta event_id",
+      "event": {
+        "source": "binance_ws",
+        "exchange": "binance",
+        "symbol": "BTCUSDT",
+        "event_time": "2026-10-19T12:00:00.000Z",
+        "ingestion_time": "2026-10-19T12:00:00.045Z",
+        "price": 68450.50,
+        "quantity": 0.4520,
+        "schema_version": "2.0.0"
+      }
+    },
+    {
+      "case": "price negativo",
+      "event": {
+        "event_id": "binance_BTCUSDT_1710500000001",
+        "source": "binance_ws",
+        "exchange": "binance",
+        "symbol": "BTCUSDT",
+        "event_time": "2026-10-19T12:00:00.000Z",
+        "ingestion_time": "2026-10-19T12:00:00.045Z",
+        "price": -10,
+        "quantity": 0.4520,
+        "schema_version": "2.0.0"
+      }
+    },
+    {
+      "case": "source fuera del enum permitido",
+      "event": {
+        "event_id": "unknown_BTCUSDT_1710500000002",
+        "source": "unknown_exchange",
+        "exchange": "unknown",
+        "symbol": "BTCUSDT",
+        "event_time": "2026-10-19T12:00:00.000Z",
+        "ingestion_time": "2026-10-19T12:00:00.045Z",
+        "price": 100,
+        "quantity": 1,
+        "schema_version": "2.0.0"
+      }
+    },
+    {
+      "case": "schema_version faltante",
+      "event": {
+        "event_id": "binance_BTCUSDT_1710500000003",
+        "source": "binance_ws",
+        "exchange": "binance",
+        "symbol": "BTCUSDT",
+        "event_time": "2026-10-19T12:00:00.000Z",
+        "ingestion_time": "2026-10-19T12:00:00.045Z",
+        "price": 100,
+        "quantity": 1
+      }
+    },
+    {
+      "case": "schema_version desactualizado",
+      "event": {
+        "event_id": "binance_BTCUSDT_1710500000004",
+        "source": "binance_ws",
+        "exchange": "binance",
+        "symbol": "BTCUSDT",
+        "event_time": "2026-10-19T12:00:00.000Z",
+        "ingestion_time": "2026-10-19T12:00:00.045Z",
+        "price": 100,
+        "quantity": 1,
+        "schema_version": "1.0"
+      }
+    }
+  ]
+}

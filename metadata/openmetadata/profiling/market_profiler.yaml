@@ -1,0 +1,65 @@
+# ==============================================================================
+# OpenMetadata Profiler Workflow: Market Data Profiling (US-25 Criterio 2 BDD)
+# Genera: mínimos, máximos, medias, recuento de nulos y cardinalidad de símbolos
+# ==============================================================================
+
+source:
+  type: profiler
+  serviceName: minio_market_lake
+  sourceConfig:
+    config:
+      type: Profiler
+      generateSampleData: true
+      sampleDataCount: 100
+      profileSample: 100.0
+      profileSampleType: PERCENTAGE
+      computeMetrics:
+        # Métricas estadísticas requeridas por US-25 Criterio 2
+        - rowCount
+        - nullCount
+        - nullProportion
+        - min
+        - max
+        - mean
+        - stddev
+        - distinctCount
+        - uniqueCount
+      columnConfig:
+        - columnName: price
+          metrics:
+            - min
+            - max
+            - mean
+            - nullCount
+        - columnName: quantity
+          metrics:
+            - min
+            - max
+            - mean
+            - nullCount
+        - columnName: symbol
+          metrics:
+            - distinctCount
+            - nullCount
+        - columnName: exchange
+          metrics:
+            - distinctCount
+            - nullCount
+        - columnName: event_time
+          metrics:
+            - min
+            - max
+            - nullCount
+
+processor:
+  type: orm-profiler
+  config: {}
+
+sink:
+  type: metadata-rest
+  config: {}
+
+workflowConfig:
+  openMetadataServerConnection:
+    hostPort: "http://openmetadata-server:8585/api"
+    authProvider: openmetadata

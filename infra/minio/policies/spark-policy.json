@@ -1,0 +1,73 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowBucketListingAndLocation",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::market-lake",
+        "arn:aws:s3:::market-checkpoints",
+        "arn:aws:s3:::market-quarantine"
+      ]
+    },
+    {
+      "Sid": "AllowSparkStreamingCheckpointsFullAccess",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": [
+        "arn:aws:s3:::market-checkpoints/*",
+        "arn:aws:s3:::market-checkpoints"
+      ]
+    },
+    {
+      "Sid": "AllowSparkBatchWriteResults",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": [
+        "arn:aws:s3:::market-lake/batch-results/*",
+        "arn:aws:s3:::market-lake/batch-results"
+      ]
+    },
+    {
+      "Sid": "AllowSparkReadHistoricalAndReference",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::market-lake/historical/*",
+        "arn:aws:s3:::market-lake/historical",
+        "arn:aws:s3:::market-lake/reference/*",
+        "arn:aws:s3:::market-lake/reference"
+      ]
+    },
+    {
+      "Sid": "AllowSparkDLQQuarantineWrite",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": [
+        "arn:aws:s3:::market-quarantine/*",
+        "arn:aws:s3:::market-quarantine"
+      ]
+    }
+  ]
+}
