@@ -270,6 +270,8 @@ def _jdbc_options(pg_conn_params: dict) -> dict:
     }
 
 
+INTERVAL_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "1d": 86400}
+
 _BATCH_OHLCV_SCHEMA = T.StructType([
     T.StructField("symbol", T.StringType()),
     T.StructField("interval", T.StringType()),
@@ -306,16 +308,21 @@ def read_batch_ohlcv(spark, interval: str, symbols: list = None) -> DataFrame:
     except Exception:  # noqa: BLE001 — Parquet sin archivos: schema no inferible.
         return spark.createDataFrame([], _BATCH_OHLCV_SCHEMA)
 
+    seconds = INTERVAL_SECONDS.get(interval, 300)
     df = (
         df.filter(F.col("interval") == interval)
         .withColumn("event_time", F.col("bucket_start"))
-        .withColumn("trades_count", F.coalesce(F.col("trades_count"), F.lit(0)))
+        .withColumn("bucket_end", F.col("bucket_start") + F.expr(f"INTERVAL {seconds} SECONDS"))
+        # `batch_historical.py` escribe la columna como `trades`, no `trades_count`.
+        .withColumn("trades_count", F.coalesce(F.col("trades"), F.lit(0)))
+        # Columnas propias del Parquet de Batch (particionado por fecha, más
+        # `volume_cumulative`) que no existen del lado Speed: hay que soltarlas
+        # o `unionByName` revienta exigiendo el mismo conjunto de columnas.
+        .select(
+            "symbol", "interval", "bucket_start", "bucket_end",
+            "open", "high", "low", "close", "volume", "trades_count", "event_time",
+        )
     )
-    # `batch-results/` está particionado por `date`; esa columna es de
-    # almacenamiento, no del contrato lógico, y rompe el unionByName contra
-    # la ruta Speed.
-    if "date" in df.columns:
-        df = df.drop("date")
     if symbols:
         df = df.filter(F.col("symbol").isin(symbols))
     return df
