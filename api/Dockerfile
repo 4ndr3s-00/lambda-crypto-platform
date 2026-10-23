@@ -29,6 +29,6 @@ ENV PYTHONUNBUFFERED=1
 ENV FRONTEND_DIR=/app/static
 ENV STATIC_DIR=/app/static
 
-EXPOSE 8000
+EXPOSE 3000
 
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "3000"]

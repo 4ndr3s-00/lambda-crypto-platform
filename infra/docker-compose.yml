@@ -372,6 +372,7 @@
       SERVING_DB_NAME: ${SERVING_DB_NAME:-serving_db}
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${API_MINIO_USER:-api_service}
+      API_PORT: 3000
       MINIO_SECRET_KEY: ${API_MINIO_PASSWORD:-api_secure_serving_pass123}
       BINANCE_API_BASE: ${BINANCE_API_BASE:-https://data-api.binance.vision}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
@@ -392,12 +393,12 @@
       CATALOG_PATH: /app/metadata/catalog.json
       GLOSSARY_PATH: /app/metadata/glossary.json
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "${API_PORT:-3000}:3000"
     volumes:
       - ../api:/app/api
       - ../metadata:/app/metadata
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 10s
       timeout: 5s
       retries: 5

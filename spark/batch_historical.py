@@ -229,6 +229,18 @@ def date_range(start: date, end: date):
 # ==============================================================================
 # Lectura y normalización (US-10)
 # ==============================================================================
+def _has_only_keep_file(partition_path: str) -> bool:
+    """Devuelve True si la partición contiene solo un archivo .keep (marcador de partición válida)."""
+    import os
+    try:
+        entries = os.listdir(partition_path)
+        # Un directorio con solo .keep significa que la partición está "sellada" y no tiene datos nuevos;
+        # Spark lanzararía UNABLE_TO_INFER_SCHEMA al intentar leerla.
+        return len(entries) == 1 and ".keep" in entries
+    except Exception:
+        return False
+
+
 def read_historical(
     spark: SparkSession,
     start: date,
@@ -250,9 +262,15 @@ def read_historical(
     descartan antes de leer: Spark aborta con `PATH_NOT_FOUND` si alguna de
     las rutas del rango no existe, y un backfill debe poder ejecutarse sobre
     rangos con huecos.
+
+    **Fix aplicado:** particiones que contienen solo un archivo `.keep` (marcador de partición válida)
+    son ignoradas automáticamente en lugar de lanzar `UNABLE_TO_INFER_SCHEMA`.
     """
     base = historical_path()
     partitions = _existing_partitions(spark, base, start, end)
+
+    # Filtrar particiones que contienen solo .keep (particiones "selladas", sin datos nuevos)
+    partitions = [p for p in partitions if not _has_only_keep_file(p)]
 
     if not partitions:
         return _empty_events(spark, input_format)
