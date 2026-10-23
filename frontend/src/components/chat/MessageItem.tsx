@@ -93,7 +93,7 @@ export function MessageItem({ message, onStreamTick }: MessageItemProps) {
           Q
         </span>
         <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
-          IQ ANALYZER · QWEN2.5 · {message.timestamp.slice(11, 19)}
+          IQ ANALYZER · GROQ · {message.timestamp.slice(11, 19)}
         </span>
       </div>
 

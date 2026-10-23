@@ -226,6 +226,16 @@ class ToolCallRecord(BaseModel):
     result_summary: str
 
 
+class ChatChart(BaseModel):
+    symbol: str
+    interval: str
+    candles: list[Candle]
+    source: str
+    data_source: DataSource = "no_data_available"
+    is_live: bool = True
+    cutoff_time: str
+
+
 class ChatResponse(BaseModel):
     answer: str
     sql: str | None = None
@@ -239,4 +249,5 @@ class ChatResponse(BaseModel):
     rag_used: bool = False
     intent: str | None = None
     router_score: float | None = None
+    chart: ChatChart | None = None
     latency_ms: float

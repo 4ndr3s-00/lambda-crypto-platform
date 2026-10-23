@@ -115,7 +115,7 @@ export function DashboardView({ interval, onIntervalChange, onBack }: DashboardV
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ type: "spring", stiffness: 260, damping: 28 }}
-            className="mx-auto w-full max-w-[1500px]"
+            className="mx-auto w-full max-w-[1200px]"
           >
             <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
               <div>
@@ -137,7 +137,7 @@ export function DashboardView({ interval, onIntervalChange, onBack }: DashboardV
               </div>
             )}
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
               {cards.map((asset) => (
                 <AssetCard key={asset.symbol} asset={asset} onSelect={setSelectedAsset} />
               ))}
