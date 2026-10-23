@@ -18,7 +18,7 @@ Plataforma de datos financieros y de criptomonedas implementando la
 - **Speed Layer**: Spark Structured Streaming calcula la ventana reciente (provisional).
 - **Serving Layer**: FastAPI + reconciliación que une ambas rutas sin doble conteo.
 
-El team de 5 personas tiene una historia por persona. **Andrés Blanco es el
+El equipo de 5 personas tiene una historia por persona. **Andrés Blanco es el
 responsable de la capa Spark**:
 
 | Historia | Descripción | Responsable |
@@ -69,18 +69,6 @@ código.
 | Escalado del clúster a N workers | `infra/docker-compose.scale.yml` | ✅ 3 workers, 6 cores |
 | Guía de continuidad | `documentacion/CONTINUIDAD.md` | ✅ |
 
-### Commits de la rama
-
-```
-4b4608e docs: documentar las formas de retomar el trabajo con OpenCode
-e465cf6 docs: añadir AGENTS.md y comando /retomar para retomar el trabajo sin contexto
-89a0154 docs: documentar el escalado del clúster Spark en la guía de continuidad
-cea42bb feat(infra): permitir escalar el clúster Spark a varios workers
-0d65dcd docs: añadir guía de continuidad entre máquinas
-99c1c1a feat(spark): implementar capa Spark Batch y reconciliación Speed/Batch
-2646a83 fix(minio): habilitar traversal de directorios para el cliente S3A
-```
-
 ### Pendiente (prioridad en este orden)
 
 1. **Integrar `wip/infra-airflow-spark-client` en `develop`.** Ese cambio
@@ -101,13 +89,11 @@ cea42bb feat(infra): permitir escalar el clúster Spark a varios workers
    (ya se dejó un comentario de avance en cada una, pero siguen abiertas y sin
    marcar aunque el código ya está en `develop`).
 
-### Checklist que se usó para revisar el PR #37
+### Checklist de revisión para esta capa
 
-Útil como referencia para los próximos PRs sobre esta misma capa:
-
-Para que la revisión sea rápida, estos son los puntos donde más fácil es
-encontrar un fallo. En su mayoría ya están cubiertos por tests, pero conviene
-confirmarlos:
+Puntos donde más fácil es encontrar un fallo en código de Spark Batch/Serving.
+En su mayoría ya están cubiertos por tests, pero conviene confirmarlos a mano
+en cualquier PR que toque esta capa:
 
 | # | Qué mirar | Dónde |
 | :--- | :--- | :--- |
@@ -119,17 +105,7 @@ confirmarlos:
 | 6 | ¿El fix de IAM amplía permisos más de lo necesario? | `infra/minio/policies/` |
 | 7 | ¿El override de escalado rompe el flujo por defecto (`make up`)? | `infra/docker-compose.scale.yml` |
 
-**Cómo reproducir la verificación localmente:**
-
-```bash
-# Tests (260 en total)
-docker exec lambda-spark-master bash -c '
-  pip install --no-cache-dir -r /opt/bitnami/spark/repo/tests/requirements.txt &&
-  cd /opt/bitnami/spark/repo &&
-  PYTHONPATH=/opt/bitnami/spark/repo:/opt/bitnami/spark/python python -m pytest tests -v'
-
-# Job real contra MinIO (ver §4)
-```
+Comando para correr los tests: ver §4.
 
 ---
 
@@ -195,7 +171,7 @@ docker exec lambda-spark-master bash -c '
 
 > **Nota:** el contenedor de Airflow monta `spark/` en solo lectura, así que
 > para probar cambios en los jobs hay que copiarlos al contenedor de Spark
-> (`docker cp`) o levantar el stack desde la rama de trabajo.
+> (`docker cp`) o levantar el stack desde tu rama con los cambios ya commiteados.
 
 ---
 
