@@ -35,40 +35,34 @@ de Aceptación en BDD** y una **lista de tareas técnicas** marcadas con `- [ ]`
 
 ---
 
-## 2. Estado actual (actualizado 2026-10-19)
+## 2. Estado actual (actualizado 2026-10-23)
 
-> **Lee este apartado con atención, porque hay dos escenarios posibles** y el
-> texto de abajo puede quedarse desactualizado tras un merge. **Verifica siempre
-> el estado real antes de actuar** con:
+> Como siempre, verifica el estado real antes de actuar — esta sección puede
+> volver a quedarse vieja:
 >
 > ```bash
-> git branch --show-current          # ¿en qué rama estás?
-> git log --oneline origin/develop -3   # ¿ya se integró el trabajo?
+> git branch --show-current
+> git log --oneline origin/develop -3
 > gh api repos/4ndr3s-00/lambda-crypto-platform/pulls/37 --jq '.state, .merged'
 > ```
->
-> **Escenario A — el PR #37 sigue abierto (estado en el que se escribió esto):**
-> el trabajo vive en `feature/spark-batch-ohlcv` y **no** está en `develop`.
-> Trabaja en esa rama y no la mergees sin que el equipo lo apruebe.
->
-> **Escenario B — el PR #37 ya fue aceptado y mergeado (lo esperado mañana):**
-> el código ya está en `develop`. Entonces **trabaja sobre `develop`**, la rama
-> `feature/spark-batch-ohlcv` ya es historia, y las issues US-10/11/12/21
-> deberían estar cerradas (en este repo la issue se cierra al mergear su PR).
-> Todo lo descrito abajo sigue siendo válido: los archivos, los comandos, las
-> decisiones de diseño y los errores ya resueltos.
 
-**Rama de trabajo: `feature/spark-batch-ohlcv`** → PR **#37** hacia `develop`.
-*(Si el PR ya se mergeó, pasa a trabajar sobre `develop`.)*
+**El PR #37 ya se mergeó.** El trabajo de Spark Batch y reconciliación está en
+`develop`; la rama `feature/spark-batch-ohlcv` es historia. Trabaja sobre
+`develop`.
+
+US-21 ya está cerrada. **US-10, US-11 y US-12 siguen abiertas** aunque su
+código está mergeado — nadie las cerró después del merge. Si te toca una de
+ellas, cierra la issue (o pide que la cierren) en vez de asumir que aún falta
+código.
 
 ### Hecho y verificado
 
 | Entregable | Archivo | Estado |
 | :--- | :--- | :--- |
-| US-10 Lectura S3A, normalización y dedup | `spark/batch_historical.py` | ✅ 44/44 tests pasan |
+| US-10 Lectura S3A, normalización y dedup | `spark/batch_historical.py` | ✅ 24/24 tests pasan (`test_spark_batch.py`) |
 | US-11 OHLCV idempotente y retornos | `spark/batch_historical.py` | ✅ Verificado end-to-end |
 | US-12 Backfill parametrizado | `spark/batch_historical.py` | ✅ Verificado end-to-end |
-| US-21 Reconciliación Speed/Batch | `spark/serving_reconcile.py` | ✅ 44/44 tests pasan |
+| US-21 Reconciliación Speed/Batch | `spark/serving_reconcile.py` | ✅ 24/24 tests pasan (`test_spark_batch.py`) |
 | Sesión Spark compartida (S3A/Hadoop-AWS) | `spark/spark_session.py` | ✅ |
 | DAG de recálculo batch | `dags/batch_recompute.py` | ✅ `airflow dags test` → success |
 | Fix de IAM para traversal S3A | `infra/minio/` | ✅ Verificado |
@@ -89,44 +83,27 @@ cea42bb feat(infra): permitir escalar el clúster Spark a varios workers
 
 ### Pendiente (prioridad en este orden)
 
-> Estos pasos asumen el **Escenario A** (PR sin mergear). Si el PR ya se
-> aceptó, el paso 1 está hecho y el trabajo continúa sobre `develop`.
-
-1. **Conseguir la revisión del PR #37.** El PR está **abierto y sin mergear**,
-   esperando que los compañeros del equipo lo verifiquen (aún no hay revisiones
-   solicitadas ni comentarios en el código). Hasta que se apruebe y se mergee,
-   `develop` no contiene este trabajo. **No lo mergees tú mismo salvo que te lo
-   pidan explícitamente**: el repositorio exige revisión por pares (ver §3 del
-   README).
-   Las issues US-10, US-11, US-12 y US-21 **están abiertas**. Se habían
-   cerrado antes de tiempo (otra sesión de IA con la misma cuenta, sin que el
-   PR estuviera revisado), lo que rompía la convención del repositorio: aquí
-   la issue se cierra cuando su PR se mergea. Se reabrieron y se dejó el motivo
-   en cada una. **Si vuelve a pasar, reabrir y volver a avisar.**
-
-2. **Responder a la revisión.** Cuando lleguen los comentarios del código,
-   iterar sobre la misma rama `feature/spark-batch-ohlcv` y hacer *push* de los
-   cambios: el PR se actualiza solo. No hace falta abrir un PR nuevo.
-
-3. **Integrar `wip/infra-airflow-spark-client` en `develop`.** Ese cambio
+1. **Integrar `wip/infra-airflow-spark-client` en `develop`.** Ese cambio
    (PySpark 3.5.1 + jars Hadoop-AWS en la imagen de Airflow) **es requisito del
    DAG `batch_recompute`**: sin él, el DAG falla con `No module named 'py4j'`.
    Es trabajo de otra persona, preservado en esa rama para que no se perdiera.
    ⚠️ Ojo: `wip/infra-airflow-spark-client` contiene **cambios de
-   `infra/docker-compose.yml`**, y este PR **también toca ese archivo** (el
-   override `docker-compose.scale.yml` es un archivo nuevo, pero el `Makefile`
-   sí cambió). Al integrar ambas cosas puede haber conflictos menores.
+   `infra/docker-compose.yml`**, y `develop` también tocó ese archivo desde
+   entonces (el override `docker-compose.scale.yml` es un archivo nuevo, pero
+   el `Makefile` sí cambió). Al integrar puede haber conflictos menores.
 
-4. **Implementar la ruta Speed** (US-18/19/20, de Diego). Es el único hueco
+2. **Implementar la ruta Speed** (US-18/19/20, de Diego). Es el único hueco
    real que queda: US-21 define y prueba la reconciliación, pero hoy la ruta
    Speed no existe, así que la reconciliación solo se ejercita con datasets
    sintéticos en las pruebas.
 
-5. **Marcar las casillas de las tareas técnicas** en US-10, US-11, US-12 y US-21
-   (ya se dejó un comentario de avance en cada una, pero las casillas siguen
-   sin marcar).
+3. **Cerrar US-10, US-11 y US-12 y marcar sus casillas de tareas técnicas**
+   (ya se dejó un comentario de avance en cada una, pero siguen abiertas y sin
+   marcar aunque el código ya está en `develop`).
 
-### Checklist para quien revise el PR #37
+### Checklist que se usó para revisar el PR #37
+
+Útil como referencia para los próximos PRs sobre esta misma capa:
 
 Para que la revisión sea rápida, estos son los puntos donde más fácil es
 encontrar un fallo. En su mayoría ya están cubiertos por tests, pero conviene
@@ -145,7 +122,7 @@ confirmarlos:
 **Cómo reproducir la verificación localmente:**
 
 ```bash
-# Tests (44 en total)
+# Tests (260 en total)
 docker exec lambda-spark-master bash -c '
   pip install --no-cache-dir -r /opt/bitnami/spark/repo/tests/requirements.txt &&
   cd /opt/bitnami/spark/repo &&
@@ -163,7 +140,6 @@ docker exec lambda-spark-master bash -c '
 >
 > ```bash
 > git checkout develop && git pull origin develop
-> # (si el PR #37 aún no se aceptó, usa: git checkout feature/spark-batch-ohlcv)
 > ```
 
 ```bash
@@ -196,7 +172,7 @@ código está en GitHub y todo lo demás se reconstruye.
 ## 4. Cómo verificar que todo funciona
 
 ```bash
-# 1. Pruebas (44 en total, no requieren el clúster en marcha)
+# 1. Pruebas (260 en total, no requieren el clúster en marcha)
 docker exec lambda-spark-master bash -c '
   pip install --no-cache-dir -r /opt/bitnami/spark/repo/tests/requirements.txt &&
   cd /opt/bitnami/spark/repo &&
