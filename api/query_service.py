@@ -102,12 +102,9 @@ class QueryService:
                 connect_timeout=3
             )
         except Exception as exc:
-            # `serving_db` es una base nueva (ver infra/postgres/init-db.sql); en
-            # despliegues viejos que todavía no la crearon, las mismas tablas
-            # existían en `market_platform`. Este fallback evita que la API caiga
-            # mientras esa migración no se haya corrido, pero puede devolver datos
-            # de la base equivocada sin que el llamador lo note — por eso el
-            # warning de abajo es obligatorio, nunca lo quites al tocar esto.
+            # Fallback a market_platform si serving_db está en migración. Puede
+            # devolver datos de la base equivocada sin que se note, por eso el
+            # warning de abajo no se debe quitar.
             logger.warning(
                 "No se pudo conectar a '%s', usando fallback 'market_platform': %s",
                 self.pg_dbname, exc,
@@ -129,9 +126,8 @@ class QueryService:
         results = {
             "postgres": "disconnected",
             "minio": "disconnected",
-            # La API no habla con Kafka directamente (no es su responsabilidad,
-            # ver IAM de mínimo privilegio en infra/minio/): se reporta fijo en
-            # vez de agregar una dependencia solo para este healthcheck.
+            # La API no tiene acceso a Kafka (fuera de su IAM), así que esto
+            # queda fijo en vez de agregar una dependencia solo para el check.
             "kafka": "operational"
         }
 
