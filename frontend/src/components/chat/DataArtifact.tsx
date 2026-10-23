@@ -69,11 +69,18 @@ function candleX(index: number, count: number): number {
   return PLOT.left + step * index + step / 2;
 }
 
-function timeLabel(iso: string): string {
-  const date = toBogota(new Date(iso));
+function timeLabel(iso: string, interval: string): string {
+  const raw = new Date(iso);
+  if (interval === "1d") return raw.toISOString().slice(5, 10);
+  const date = toBogota(raw);
   const hh = String(date.getUTCHours()).padStart(2, "0");
   const mm = String(date.getUTCMinutes()).padStart(2, "0");
   return `${hh}:${mm}`;
+}
+
+function stampLabel(iso: string, interval: string): string {
+  if (interval === "1d") return new Date(iso).toISOString().slice(0, 10) + " UTC";
+  return toBogota(new Date(iso)).toISOString().replace("T", " ").slice(0, 16) + " COT";
 }
 
 /* ------------------------------------------------------------------ */
@@ -82,11 +89,12 @@ function timeLabel(iso: string): string {
 
 interface ChartProps {
   candles: OHLCVCandle[];
+  interval: string;
   hoveredIndex: number | null;
   onHover: (index: number | null, cursor: CursorPoint | null) => void;
 }
 
-function CandlestickChart({ candles, onHover, hoveredIndex }: ChartProps) {
+function CandlestickChart({ candles, interval, onHover, hoveredIndex }: ChartProps) {
   const { bounds, maxVolume, gridLines } = useMemo(() => {
     const b = computeBounds(candles);
     let maxVol = 0;
@@ -172,10 +180,10 @@ function CandlestickChart({ candles, onHover, hoveredIndex }: ChartProps) {
       {candles.length > 0 && (
         <g>
           <text x={PLOT.left} y={PLOT.h - 8} fill="rgba(255,255,255,0.3)" fontSize="9" fontFamily="monospace">
-            {timeLabel(candles[0]!.timestamp)}
+            {timeLabel(candles[0]!.timestamp, interval)}
           </text>
           <text x={PLOT.w - PLOT.right} y={PLOT.h - 8} textAnchor="end" fill="rgba(255,255,255,0.3)" fontSize="9" fontFamily="monospace">
-            {timeLabel(candles[candles.length - 1]!.timestamp)}
+            {timeLabel(candles[candles.length - 1]!.timestamp, interval)}
           </text>
         </g>
       )}
@@ -206,7 +214,7 @@ function Crosshair({ candle, index, count, bounds }: CrosshairProps) {
 /* Area series (comparison / reconciliation views)                     */
 /* ------------------------------------------------------------------ */
 
-function AreaChart({ candles, onHover, hoveredIndex }: ChartProps) {
+function AreaChart({ candles, interval, onHover, hoveredIndex }: ChartProps) {
   const gradientId = useId();
   const { bounds, path, areaPath, gridLines, points } = useMemo(() => {
     const b = computeBounds(candles);
@@ -287,10 +295,10 @@ function AreaChart({ candles, onHover, hoveredIndex }: ChartProps) {
       {candles.length > 0 && (
         <g>
           <text x={PLOT.left} y={PLOT.h - 8} fill="rgba(255,255,255,0.3)" fontSize="9" fontFamily="monospace">
-            {timeLabel(candles[0]!.timestamp)}
+            {timeLabel(candles[0]!.timestamp, interval)}
           </text>
           <text x={PLOT.w - PLOT.right} y={PLOT.h - 8} textAnchor="end" fill="rgba(255,255,255,0.3)" fontSize="9" fontFamily="monospace">
-            {timeLabel(candles[candles.length - 1]!.timestamp)}
+            {timeLabel(candles[candles.length - 1]!.timestamp, interval)}
           </text>
         </g>
       )}
@@ -307,7 +315,7 @@ function AreaChart({ candles, onHover, hoveredIndex }: ChartProps) {
 /* Data table                                                          */
 /* ------------------------------------------------------------------ */
 
-function ArtifactTable({ candles }: { candles: OHLCVCandle[] }) {
+function ArtifactTable({ candles, interval }: { candles: OHLCVCandle[]; interval: string }) {
   return (
     <div className="max-h-[320px] overflow-auto rounded-lg border border-white/[0.06]">
       <table className="w-full min-w-[560px] border-collapse font-mono text-[11px] tabular-nums">
@@ -327,7 +335,7 @@ function ArtifactTable({ candles }: { candles: OHLCVCandle[] }) {
             return (
               <tr key={candle.timestamp} className="border-t border-white/[0.04] hover:bg-white/[0.03]">
                 <td className="whitespace-nowrap px-3 py-1.5 text-zinc-500">
-                  {candle.timestamp.replace("T", " ").slice(0, 19)}
+                  {stampLabel(candle.timestamp, interval)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-1.5 text-right text-zinc-300">{formatNumber(candle.open, 2)}</td>
                 <td className="whitespace-nowrap px-3 py-1.5 text-right text-zinc-300">{formatNumber(candle.high, 2)}</td>
@@ -510,9 +518,9 @@ export function DataArtifact({ artifact }: DataArtifactProps) {
             className="relative"
           >
             {view.type === "CANDLESTICK" ? (
-              <CandlestickChart candles={view.data} hoveredIndex={hoveredIndex} onHover={handleHover} />
+              <CandlestickChart candles={view.data} interval={view.interval} hoveredIndex={hoveredIndex} onHover={handleHover} />
             ) : (
-              <AreaChart candles={view.data} hoveredIndex={hoveredIndex} onHover={handleHover} />
+              <AreaChart candles={view.data} interval={view.interval} hoveredIndex={hoveredIndex} onHover={handleHover} />
             )}
 
             <AnimatePresence>
@@ -525,7 +533,7 @@ export function DataArtifact({ artifact }: DataArtifactProps) {
                   style={{ left: tooltipPosition.left, top: tooltipPosition.top, width: TIP_WIDTH }}
                   className="pointer-events-none absolute z-20 rounded-lg border border-white/10 bg-zinc-950 px-3 py-2 font-mono text-[10px] tabular-nums shadow-[0_10px_40px_-10px_rgba(0,0,0,0.9)]"
                 >
-                  <div className="mb-1 text-zinc-500">{hovered.timestamp.replace("T", " ").slice(0, 16)}</div>
+                  <div className="mb-1 text-zinc-500">{stampLabel(hovered.timestamp, view.interval)}</div>
                   <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
                     <span className="text-zinc-500">O</span>
                     <span className="text-right text-zinc-200">{formatNumber(hovered.open, 2)}</span>
@@ -557,7 +565,7 @@ export function DataArtifact({ artifact }: DataArtifactProps) {
             exit={{ opacity: 0, y: -6 }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
           >
-            <ArtifactTable candles={view.data} />
+            <ArtifactTable candles={view.data} interval={view.interval} />
           </motion.div>
         )}
       </AnimatePresence>

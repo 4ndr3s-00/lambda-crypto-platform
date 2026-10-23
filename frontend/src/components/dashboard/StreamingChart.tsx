@@ -64,13 +64,17 @@ function priceDigits(price: number): number {
 }
 
 function axisLabel(iso: string, interval: DashboardInterval): string {
-  const date = toBogota(new Date(iso));
+  const raw = new Date(iso);
+  const date = toBogota(raw);
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
   const hh = String(date.getUTCHours()).padStart(2, "0");
   const mm = String(date.getUTCMinutes()).padStart(2, "0");
   if (interval === "1m" || interval === "5m") return `${hh}:${mm}`;
-  if (interval === "1d") return `${month}-${day}`;
+  if (interval === "1d") {
+    const utc = raw.toISOString().slice(0, 10).split("-");
+    return `${utc[1]}-${utc[2]}`;
+  }
   return `${month}-${day} ${hh}:${mm}`;
 }
 
@@ -360,8 +364,11 @@ export function StreamingChart({ candles, interval, live = true }: StreamingChar
         >
           <div className="mb-1 text-zinc-500">
             {(() => {
+              if (interval === "1d") {
+                return new Date(hovered.timestamp).toISOString().slice(0, 10) + " UTC";
+              }
               const bogota = toBogota(new Date(hovered.timestamp)).toISOString();
-              return interval === "1d" ? bogota.slice(0, 10) + " COT" : bogota.replace("T", " ").slice(0, 19) + " COT";
+              return bogota.replace("T", " ").slice(0, 19) + " COT";
             })()}
           </div>
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
