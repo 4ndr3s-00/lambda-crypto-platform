@@ -410,7 +410,34 @@ class QueryService:
                     for row in rows
                 ]
                 candles = [candle for candle in candles if candle["close"] > 0]
-                if len(candles) >= safe_limit:
+                max_age_seconds = {
+                    "1m": 120,
+                    "5m": 600,
+                    "15m": 1800,
+                    "1h": 7200,
+                    "4h": 28800,
+                    "1d": 172800,
+                    "1D": 172800,
+                    "7D": 1209600,
+                }.get(interval, 3600)
+                fresh = False
+                if candles:
+                    try:
+                        last_ts = datetime.fromisoformat(
+                            str(candles[-1]["timestamp"]).replace("Z", "+00:00")
+                        )
+                        if last_ts.tzinfo is None:
+                            last_ts = last_ts.replace(tzinfo=timezone.utc)
+                        age_seconds = (datetime.now(timezone.utc) - last_ts).total_seconds()
+                        fresh = age_seconds <= max_age_seconds
+                        if not fresh:
+                            logger.info(
+                                "OHLCV DB stale para %s %s: ?ltima=%s edad=%.0fs max=%ss; usando exchange",
+                                clean_symbol, interval, last_ts.isoformat(), age_seconds, max_age_seconds,
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("No se pudo validar frescura OHLCV: %s", exc)
+                if len(candles) >= safe_limit and fresh:
                     return {
                         "symbol": clean_symbol,
                         "interval": interval,
