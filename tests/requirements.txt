@@ -1,11 +1,14 @@
 # Dependencias de las pruebas de la plataforma.
 #
 # Para ejecutarlas dentro del contenedor de Spark (que ya incluye PySpark y
-# Java 17):
+# Java 17). El repo completo está montado de solo lectura en
+# `/opt/bitnami/spark/repo` (ver `spark-master` en infra/docker-compose.yml);
+# `tests/` vive en la raíz del repo, no bajo `spark/jobs/`:
 #
 #   docker exec lambda-spark-master bash -c '
-#     pip install --no-cache-dir -r /opt/bitnami/spark/jobs/tests/requirements.txt &&
-#     cd /opt/bitnami/spark/jobs && python -m pytest tests -v'
+#     pip install --no-cache-dir -r /opt/bitnami/spark/repo/tests/requirements.txt &&
+#     cd /opt/bitnami/spark/repo &&
+#     PYTHONPATH=/opt/bitnami/spark/repo:/opt/bitnami/spark/python python -m pytest tests -v'
 #
 # Alternativamente, en el host con Java 17 y un entorno virtual:
 #

@@ -44,7 +44,7 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
-from spark_session import build_spark_session, checkpoints_path
+from spark_session import build_spark_session, checkpoints_path, pg_conn_params_from_args
 
 # ==============================================================================
 # Esquema Formal del Contrato Canónico (US-05 / market_event.schema.json)
@@ -915,13 +915,7 @@ def main(argv=None):
     # 5. Rama Postgres: sink de métricas hacia `serving.realtime_metrics` (US-22/23)
     if not args.disable_postgres_sink:
         postgres_checkpoint = os.path.join(args.checkpoint_dir, "postgres")
-        pg_conn_params = {
-            "host": args.postgres_host,
-            "port": args.postgres_port,
-            "dbname": args.postgres_db,
-            "user": args.postgres_user,
-            "password": args.postgres_password,
-        }
+        pg_conn_params = pg_conn_params_from_args(args)
         postgres_query = start_metrics_postgres_query(
             metrics_raw_df=metrics_raw,
             pg_conn_params=pg_conn_params,

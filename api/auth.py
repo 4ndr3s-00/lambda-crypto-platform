@@ -14,7 +14,13 @@ from fastapi import Header, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 API_SECURITY_ENABLED = os.environ.get("API_SECURITY_ENABLED", "true").lower() in ("true", "1", "yes")
-ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "lambda_admin_secure_key_2026")
+ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY")
+
+if API_SECURITY_ENABLED and not ADMIN_API_KEY:
+    raise RuntimeError(
+        "ADMIN_API_KEY no está definida. Configúrala en el entorno o desactiva "
+        "la seguridad con API_SECURITY_ENABLED=false para desarrollo local."
+    )
 
 security_bearer = HTTPBearer(auto_error=False)
 

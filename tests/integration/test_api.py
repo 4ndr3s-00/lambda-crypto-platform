@@ -162,7 +162,7 @@ async def test_endpoint_pipeline_status():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(
             "/api/pipeline/status",
-            headers={"X-API-Key": os.getenv("ADMIN_API_KEY", "lambda_admin_secure_key_2026")},
+            headers={"X-API-Key": os.environ["ADMIN_API_KEY"]},
         )
 
     assert response.status_code == 200

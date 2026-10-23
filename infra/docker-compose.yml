@@ -146,11 +146,26 @@
       - AWS_SECRET_ACCESS_KEY=${SPARK_MINIO_PASSWORD:-spark_secure_lake_pass123}
       - AWS_REGION=us-east-1
       - S3_ENDPOINT=http://minio:9000
+      # Para `pytest tests` dentro del contenedor (AGENTS.md §4): el host de
+      # Postgres es siempre el nombre del servicio Docker, no configurable.
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres_secure_pass}
+      - POSTGRES_DB=${POSTGRES_DB:-market_platform}
+      - SERVING_DB_NAME=${SERVING_DB_NAME:-serving_db}
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-}
+      - API_SECURITY_ENABLED=${API_SECURITY_ENABLED:-true}
     ports:
       - "${SPARK_MASTER_PORT:-7077}:7077"
       - "${SPARK_MASTER_WEBUI_PORT:-8080}:8080"
     volumes:
       - ../spark:/opt/bitnami/spark/jobs:ro
+      # Repo completo de solo lectura para poder correr `pytest tests` dentro
+      # del contenedor (pytest.ini espera `api/`, `ingestion/`, etc. como
+      # hermanos de `tests/`, no solo `spark/jobs/`).
+      - ..:/opt/bitnami/spark/repo:ro
       - spark_data:/bitnami/spark
     healthcheck:
       test: ["CMD", "/opt/bitnami/python/bin/python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080').read()"]
@@ -391,6 +406,9 @@
       RAG_DOCS_DIR: /app/metadata
       CATALOG_PATH: /app/metadata/catalog.json
       GLOSSARY_PATH: /app/metadata/glossary.json
+      API_SECURITY_ENABLED: ${API_SECURITY_ENABLED:-true}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:

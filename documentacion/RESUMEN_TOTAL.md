@@ -27,7 +27,7 @@ Arquitectura: Batch (Spark) + Speed (Streaming) + Serving (FastAPI).
 | `dags/batch_recompute.py` | DAG Airflow para recálculo batch |
 | `tests/unit/test_spark_batch.py` | 44 pruebas unitarias (US-10, US-11, US-12, US-21) |
 | `infra/docker-compose.scale.yml` | Override para escalar workers Spark |
-| `docs/CONTINUIDAD.md` | Guía de continuidad entre máquinas |
+| `documentacion/CONTINUIDAD.md` | Guía de continuidad entre máquinas |
 
 ### Lo que NO trajo PR #37 (otras historias):
 
@@ -89,7 +89,7 @@ raw_events, valid_events, invalid_events, deduplicated_events, written
 
 | Archivo | Para qué |
 |---------|-----------|
-| `DESARROLLO_SPARCK_BATCH.md` | Resumen completo del trabajo de Andrés Blanco (US-10 a US-21) |
+| `DESARROLLO_SPARK_BATCH.md` | Resumen completo del trabajo de Andrés Blanco (US-10 a US-21) |
 | `ESTADO_ACTUAL_REPOSITORIO.md` | Estado actual del repo, commits, branches, qué hay en develop |
 | `US20_CHECKPOINTS_MINIO.md` | Documentación detallada de la US-20 (checkpoints en MinIO) |
 | `ERRORES_YA_RESUELTOS.md` | Tabla de errores comunes y soluciones (no reintroducirlos) |
@@ -112,7 +112,7 @@ raw_events, valid_events, invalid_events, deduplicated_events, written
 ## 🚀 Qué hace cada compañero ahora
 
 ### Para el compañero 1 (continuar con Spark):
-1. Revisar `DESARROLLO_SPARCK_BATCH.md` para contexto de las historias
+1. Revisar `DESARROLLO_SPARK_BATCH.md` para contexto de las historias
 2. El trabajo ya está en `develop`, no hacer PR nuevo
 3. Levantar con `make up`
 4. Probar job con spark-submit + 5 flags MinIO
@@ -129,7 +129,7 @@ raw_events, valid_events, invalid_events, deduplicated_events, written
 
 ### Para el compañero 3 (documentación/quiero entender):
 1. Revisar `AGENTS.md` (contexto general, decisiones, errores resueltos)
-2. Leer `DESARROLLO_SPARCK_BATCH.md` (qué se hizo por historia)
+2. Leer `DESARROLLO_SPARK_BATCH.md` (qué se hizo por historia)
 3. Revisar `ESTADO_ACTUAL_REPOSITORIO.md` (dónde estamos parados)
 4. Revisar `US20_CHECKPOINTS_MINIO.md` (checkpoints)
 5. Revisar `ERRORES_YA_RESUELTOS.md` (qué no volver a hacer)

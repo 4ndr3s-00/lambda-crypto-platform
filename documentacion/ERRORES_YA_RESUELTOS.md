@@ -99,5 +99,5 @@ docker exec lambda-spark-master bash -c '
 
 - `AGENTS.md`: Contexto completo, decisiones de diseño, errores ya resueltos
 - `SPARK_WORKER_GUIDE.md`: Configurar worker en otro computador
-- `docs/CONTINUIDAD.md`: Guía de continuidad entre máquinas
+- `documentacion/CONTINUIDAD.md`: Guía de continuidad entre máquinas
 - `Makefile`: Comandos de ayuda (`make up`, `make ps`, `make scale-spark`)

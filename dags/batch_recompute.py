@@ -269,6 +269,7 @@ if DAG is not None:
         schedule="0 2 * * *",  # 02:00 UTC consolidación diaria o activado por ingest_historical
         start_date=datetime(2026, 10, 1),
         catchup=False,
+        is_paused_upon_creation=False,
         tags=["batch", "spark", "minio", "lambda-architecture", "serving"],
         on_failure_callback=handle_task_failure,
         params={

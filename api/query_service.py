@@ -85,7 +85,8 @@ class QueryService:
                 cursor.fetchone()
             connection.close()
             self._pg_available = True
-        except Exception:
+        except Exception as exc:
+            logger.warning("Postgres (%s) no disponible: %s", self.pg_dbname, exc)
             self._pg_available = False
         return self._pg_available
 
@@ -100,8 +101,14 @@ class QueryService:
                 dbname=self.pg_dbname,
                 connect_timeout=3
             )
-        except Exception:
-            # Fallback a market_platform si serving_db está en migración
+        except Exception as exc:
+            # Fallback a market_platform si serving_db está en migración. Puede
+            # devolver datos de la base equivocada sin que se note, por eso el
+            # warning de abajo no se debe quitar.
+            logger.warning(
+                "No se pudo conectar a '%s', usando fallback 'market_platform': %s",
+                self.pg_dbname, exc,
+            )
             return psycopg2.connect(
                 host=self.pg_host,
                 port=self.pg_port,
@@ -119,6 +126,8 @@ class QueryService:
         results = {
             "postgres": "disconnected",
             "minio": "disconnected",
+            # La API no tiene acceso a Kafka (fuera de su IAM), así que esto
+            # queda fijo en vez de agregar una dependencia solo para el check.
             "kafka": "operational"
         }
 
@@ -632,14 +641,6 @@ class QueryService:
                 "fetched_at": now,
                 "errors": [str(exc)],
             }
-
-    def get_market_orderbook(self, symbol: str, limit: int = 20) -> Dict[str, Any]:
-        clean_symbol = sanitize_symbol(symbol)
-        return exchange_client.fetch_depth(clean_symbol, limit)
-
-    def get_market_trades(self, symbol: str, limit: int = 50) -> Dict[str, Any]:
-        clean_symbol = sanitize_symbol(symbol)
-        return exchange_client.fetch_trades(clean_symbol, limit)
 
     def get_market_pipeline_status(self) -> Dict[str, Any]:
         """

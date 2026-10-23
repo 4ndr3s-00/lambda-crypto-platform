@@ -35,7 +35,7 @@ Ubicación actual: `develop`
 ├── .env.example      # Plantilla de .env
 ├── AGENTS.md         # Contexto del proyecto, decisiones, errores resueltos
 ├── SPARK_WORKER_GUIDE.md  # Guía para worker en otro computador
-├── DESARROLLO_SPARCK_BATCH.md  # Resumen del trabajo de Andrés Blanco
+├── DESARROLLO_SPARK_BATCH.md  # Resumen del trabajo de Andrés Blanco
 ├── ESTADO_ACTUAL_REPOSITORIO.md  # Este archivo
 ├── infra/            # Configuración Docker Compose
 │   ├── docker-compose.yml
@@ -50,7 +50,7 @@ Ubicación actual: `develop`
 ├── tests/            # Pruebas unitarias
 │   └── unit/
 │       └── test_spark_batch.py (44 tests)
-├── docs/             # Documentación
+├── documentacion/    # Documentación
 │   ├── CONTINUIDAD.md
 │   └── ...
 ├── infra/minio/      # Configuración MinIO
@@ -92,7 +92,7 @@ Ubicación actual: `develop`
 3. **Levantar**: `make up`
 4. **Verificar**: `make ps`
 5. **Probar**: Ejecutar job Spark con credenciales S3 correctas
-6. **Documentación**: Revisar `AGENTS.md` y `DESARROLLO_SPARCK_BATCH.md` para contexto
+6. **Documentación**: Revisar `AGENTS.md` y `DESARROLLO_SPARK_BATCH.md` para contexto
 
 ## Rama `feature/spark-batch-ohlcv`:
 

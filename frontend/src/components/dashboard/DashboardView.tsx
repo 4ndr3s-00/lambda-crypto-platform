@@ -8,7 +8,7 @@ import type {
   DashboardSymbol,
   PipelineStatusResponse,
 } from "@/lib/types";
-import { mockApi } from "@/lib/mockData";
+import { marketApi } from "@/lib/marketClient";
 import { AssetCard } from "./AssetCard";
 import { AssetDeepDive } from "./AssetDeepDive";
 import { GlobalTelemetry } from "./GlobalTelemetry";
@@ -33,7 +33,7 @@ export function DashboardView({ interval, onIntervalChange, onBack }: DashboardV
     let cancelled = false;
     const load = async () => {
       try {
-        const overview = await mockApi.getOverview();
+        const overview = await marketApi.getOverview();
         if (cancelled) return;
         setCards(overview.assets);
         setOverviewSource(overview.source);
@@ -54,7 +54,7 @@ export function DashboardView({ interval, onIntervalChange, onBack }: DashboardV
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      void mockApi.getPipelineStatus().then((status) => {
+      void marketApi.getPipelineStatus().then((status) => {
         if (!cancelled) {
           setPipeline(status);
           setLagSec(status.freshnessSeconds);
