@@ -56,24 +56,35 @@ def test_security_disabled_bypasses_auth(monkeypatch):
 def test_raises_on_import_without_admin_key_when_security_enabled(monkeypatch):
     """Si API_SECURITY_ENABLED=true y no hay ADMIN_API_KEY, el módulo debe
     fallar al cargarse en vez de arrancar con una clave admin adivinable."""
-    monkeypatch.setenv("API_SECURITY_ENABLED", "true")
-    monkeypatch.delenv("ADMIN_API_KEY", raising=False)
-    with pytest.raises(RuntimeError):
+    original_key = os.environ.get("ADMIN_API_KEY")
+    original_enabled = os.environ.get("API_SECURITY_ENABLED")
+    try:
+        monkeypatch.setenv("API_SECURITY_ENABLED", "true")
+        monkeypatch.delenv("ADMIN_API_KEY", raising=False)
+        with pytest.raises(RuntimeError):
+            importlib.reload(auth_module)
+    finally:
+        # Restaurar el módulo al estado real del entorno (no un valor adivinado),
+        # para no dejarlo desincronizado cuando monkeypatch revierta os.environ.
+        if original_key is not None:
+            monkeypatch.setenv("ADMIN_API_KEY", original_key)
+        if original_enabled is not None:
+            monkeypatch.setenv("API_SECURITY_ENABLED", original_enabled)
         importlib.reload(auth_module)
-
-    # Dejar el módulo en un estado válido para el resto de la suite.
-    monkeypatch.setenv("ADMIN_API_KEY", os.environ.get("ADMIN_API_KEY", "test_admin_key_do_not_use_in_prod"))
-    importlib.reload(auth_module)
 
 
 def test_no_default_admin_key_fallback(monkeypatch):
     """El módulo nunca debe caer en una clave admin fija hardcodeada."""
-    monkeypatch.setenv("API_SECURITY_ENABLED", "false")
-    monkeypatch.delenv("ADMIN_API_KEY", raising=False)
-    importlib.reload(auth_module)
-    assert auth_module.ADMIN_API_KEY is None
-
-    # Restaurar el estado esperado por el resto de la suite.
-    monkeypatch.setenv("API_SECURITY_ENABLED", "true")
-    monkeypatch.setenv("ADMIN_API_KEY", os.environ.get("ADMIN_API_KEY", "test_admin_key_do_not_use_in_prod"))
-    importlib.reload(auth_module)
+    original_key = os.environ.get("ADMIN_API_KEY")
+    original_enabled = os.environ.get("API_SECURITY_ENABLED")
+    try:
+        monkeypatch.setenv("API_SECURITY_ENABLED", "false")
+        monkeypatch.delenv("ADMIN_API_KEY", raising=False)
+        importlib.reload(auth_module)
+        assert auth_module.ADMIN_API_KEY is None
+    finally:
+        if original_key is not None:
+            monkeypatch.setenv("ADMIN_API_KEY", original_key)
+        if original_enabled is not None:
+            monkeypatch.setenv("API_SECURITY_ENABLED", original_enabled)
+        importlib.reload(auth_module)
