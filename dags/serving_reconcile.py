@@ -171,6 +171,7 @@ if DAG is not None:
         start_date=datetime(2026, 10, 1),
         catchup=False,
         max_active_runs=1,
+        is_paused_upon_creation=False,
         tags=["serving", "spark", "reconciliation", "lambda-architecture"],
         on_failure_callback=handle_task_failure,
         params={
