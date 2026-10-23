@@ -13,8 +13,8 @@ import type {
   OnChainSnapshot,
   OrderBookSnapshot,
 } from "@/lib/types";
-import { DASHBOARD_INTERVALS, mockApi } from "@/lib/mockData";
-import { createArbitrage, createLiquidations, createOnChain } from "@/lib/streamMock";
+import { DASHBOARD_INTERVALS, marketApi } from "@/lib/marketClient";
+import { createArbitrage, createLiquidations, createOnChain } from "@/lib/simulatedMetrics";
 import { cn, formatCompact, formatPercent, formatUsd } from "@/lib/utils";
 import { StreamingChart } from "./StreamingChart";
 import { OrderBookPanel } from "./OrderBookPanel";
@@ -56,7 +56,7 @@ export function AssetDeepDive({ symbol, interval, onIntervalChange, onBack }: As
 
     const load = async () => {
       try {
-        const next = await mockApi.getOHLCV({ symbol, interval, limit: interval === "1d" ? 100 : 96 });
+        const next = await marketApi.getOHLCV({ symbol, interval, limit: interval === "1d" ? 100 : 96 });
         if (cancelled) return;
         setSeries(next);
         setSeriesError(next.isLive ? null : next.error ?? "datos simulados");
@@ -82,8 +82,8 @@ export function AssetDeepDive({ symbol, interval, onIntervalChange, onBack }: As
     const load = async () => {
       try {
         const [book, tape] = await Promise.all([
-          mockApi.getOrderBook(symbol, 20),
-          mockApi.getTrades(symbol, 60),
+          marketApi.getOrderBook(symbol, 20),
+          marketApi.getTrades(symbol, 60),
         ]);
         if (cancelled) return;
         setOrderBook(book);

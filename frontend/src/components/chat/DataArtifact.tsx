@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { DataArtifact as ArtifactModel, MarketInterval, OHLCVCandle } from "@/lib/types";
-import { MARKET_INTERVALS, isMarketInterval, regenerateArtifact } from "@/lib/mockData";
+import { MARKET_INTERVALS, isMarketInterval, regenerateArtifact } from "@/lib/marketClient";
 import { clamp, cn, formatCompact, formatNumber, formatPercent, formatUsd, toBogota } from "@/lib/utils";
 
 const BULL = "#10B981";

@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import type { QuickPrompt } from "@/lib/mockData";
+import type { QuickPrompt } from "@/lib/marketClient";
 import { cn } from "@/lib/utils";
 
 const container = {

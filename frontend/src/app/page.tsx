@@ -16,7 +16,7 @@ import type {
   MarketTicker,
   ViewMode,
 } from "@/lib/types";
-import { QUICK_PROMPTS, mockApi } from "@/lib/mockData";
+import { QUICK_PROMPTS, marketApi } from "@/lib/marketClient";
 import { cn } from "@/lib/utils";
 
 const CAPSULE_SPRING = {
@@ -53,7 +53,7 @@ export default function Home() {
     let cancelled = false;
     const load = async () => {
       try {
-        const overview = await mockApi.getOverview();
+        const overview = await marketApi.getOverview();
         if (cancelled) return;
         setTickers(
           overview.assets
@@ -104,7 +104,7 @@ export default function Home() {
 
     const token = generationRef.current;
 
-    void mockApi
+    void marketApi
       .postChat({ query })
       .then(({ message }) => {
         if (generationRef.current !== token) return;

@@ -335,7 +335,7 @@ async function postChat({ query }: { query: string }): Promise<{ message: ChatMe
   return { message };
 }
 
-export const mockApi = {
+export const marketApi = {
   getOverview: fetchOverview,
   getOHLCV: fetchOHLCV,
   getOrderBook: fetchOrderBook,
