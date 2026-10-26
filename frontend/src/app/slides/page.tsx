@@ -7,6 +7,22 @@ import { cn } from "@/lib/utils";
 
 const TOTAL = 13;
 
+const PRESENTERS = [
+  "Equipo completo",
+  "Equipo completo",
+  "Andr?s Teher?n",
+  "Samuel Benavidez",
+  "Samuel Roncancio",
+  "Andr?s Blanco",
+  "Andr?s Blanco",
+  "Camilo",
+  "Andr?s Teher?n",
+  "Diego",
+  "Sebasti?n",
+  "Equipo completo",
+  "Equipo completo",
+];
+
 const slideVariants = {
   enter: (direction: number) => ({
     x: direction > 0 ? 90 : -90,
@@ -791,6 +807,9 @@ export default function SlidesPage() {
           </span>
         </div>
         <div className="flex items-center gap-3 font-mono text-[9px] uppercase tracking-[0.18em] text-zinc-600">
+          <span className="rounded-full border border-emerald-400/20 bg-emerald-400/[0.05] px-3 py-1 text-emerald-300">
+            Responsable ? {PRESENTERS[index]}
+          </span>
           <span>{String(index + 1).padStart(2, "0")} / {String(TOTAL).padStart(2, "0")}</span>
           <span className="h-1 w-24 overflow-hidden rounded-full bg-white/10">
             <motion.span
