@@ -1,0 +1,399 @@
+CONTEXTO PARA NUEVA SESION - IQ ANALYZER / LAMBDA CRYPTO PLATFORM
+==================================================================
+
+RUTA DEL PROYECTO
+-----------------
+C:\Users\Freez\proyectos\lambda-crypto-platform
+
+REPOSITORIO
+-----------
+https://github.com/4ndr3s-00/lambda-crypto-platform
+
+RAMA DE TRABAJO
+---------------
+develop
+
+Para empezar:
+  cd C:\Users\Freez\proyectos\lambda-crypto-platform
+  git checkout develop
+  git pull
+
+La key de Groq vive solo en .env (ignorado por git). No commitear secretos.
+
+OBJETIVO DE ESTA SESION
+-----------------------
+Entender el flujo completo, no memorizar nombres:
+desde la extraccion del dato en Binance hasta que se muestra en el dashboard
+o en el chat. Tambien revisar y mejorar la arquitectura sin romper lo existente.
+
+ARQUITECTURA GENERAL (LAMBDA)
+-----------------------------
+Binance / fuentes externas
+        |
+        v
+Ingesta (REST / WebSocket / CSV)
+        |
+        v
+Kafka
+        |
+        +------------------------------+
+        |                              |
+        v                              v
+SPEED LAYER                        BATCH LAYER
+Spark Structured Streaming         Spark Batch
+event-time + watermark + DLQ       OHLCV + retornos
+        |                              |
+        v                              v
+serving.realtime_metrics           MinIO batch-results/
+        |                              |
+        +--------------+---------------+
+                       |
+                       v
+              SERVING RECONCILIATION
+              Airflow cada 5 minutos
+              Batch + Speed
+                       |
+                       v
+              serving.ohlcv_reconciled
+                       |
+                       v
+                    FastAPI
+                       |
+                       v
+              Frontend Next.js / Chat AI
+
+COMPONENTES Y RESPONSABILIDADES
+-------------------------------
+1. INGESTA
+   Archivos:
+   - ingestion/connectors/market_rest_stream.py
+   - ingestion/connectors/market_websocket.py
+   - ingestion/connectors/market_rest.py
+   - ingestion/connectors/binance_rest.py
+   - ingestion/connectors/csv_loader.py
+   - ingestion/connectors/kafka_producer.py
+   - ingestion/contracts/market_event.schema.json
+   - ingestion/contracts/validator.py
+
+   Funcion:
+   - Extraer eventos de mercado.
+   - Validar contra el contrato canonico.
+   - Publicar en Kafka.
+   - Enviar invalidos a market.dlq.
+
+   Nota:
+   - market_rest_stream.py es el productor continuo usado en este entorno.
+   - El WebSocket de Binance devuelve HTTP 451 en esta region.
+
+2. KAFKA
+   Archivo:
+   - infra/kafka/init-topics.sh
+
+   Topics:
+   - market.events  (4 particiones, retencion 7 dias)
+   - market.ohlcv
+   - market.metrics
+   - market.dlq
+
+   Clave de particion:
+   - exchange|symbol
+
+3. SPEED LAYER - SPARK STRUCTURED STREAMING
+   Archivo:
+   - spark/streaming_market.py
+
+   Flujo:
+   - Lee market.events.
+   - Parsea contrato.
+   - Usa event_time.
+   - Aplica watermark de 2 minutos.
+   - Deduplica.
+   - Calcula ventanas y metricas.
+   - Envia invalidos a market.dlq.
+   - Publica en market.metrics.
+   - Escribe snapshot JDBC en serving.realtime_metrics.
+   - Checkpoints en s3a://market-checkpoints/.
+
+   Importante:
+   - No guarda historial completo de velas.
+   - Principalmente guarda el ultimo snapshot por simbolo.
+   - Por eso 1m/5m pueden ir atrasados respecto al mercado.
+
+4. BATCH LAYER
+   Archivos:
+   - spark/batch_historical.py
+   - spark/spark_session.py
+   - dags/batch_recompute.py
+   - dags/ingest_historical.py
+
+   Flujo:
+   - Datos crudos historicos en s3a://market-lake/historical/source=.../date=...
+   - batch_historical.py normaliza, deduplica y calcula OHLCV + retornos.
+   - Escribe en s3a://market-lake/batch-results/metric=ohlcv/date=...
+   - Escribe en s3a://market-lake/batch-results/metric=returns/date=...
+
+   Airflow:
+   - ingest_historical: diario 00:00 UTC.
+   - batch_recompute: diario 02:00 UTC, procesa dia anterior.
+   - compact_files: semanal, compacta archivos chicos en MinIO.
+   - replay_dlq: manual, reprocesa DLQ.
+
+5. SERVING RECONCILIATION
+   Archivos:
+   - dags/serving_reconcile.py
+   - spark/serving_reconcile.py
+
+   Frecuencia:
+   - Cada 5 minutos.
+
+   Flujo:
+   - Lee batch-results desde MinIO.
+   - Lee snapshot Speed desde serving.realtime_metrics.
+   - Aplica precedencia:
+     * Batch manda en ventanas cerradas.
+     * Speed manda en ventana reciente.
+   - Escribe serving.ohlcv_reconciled.
+
+   Columnas:
+   - symbol, timeframe, bucket_start, bucket_end
+   - open_price, high_price, low_price, close_price
+   - volume, trades_count
+   - source_layer, is_consolidated, updated_at
+
+6. POSTGRESQL
+   Esquema:
+   - infra/postgres/init.sql
+
+   Tablas:
+   - serving.dim_assets
+   - serving.realtime_metrics
+   - serving.ohlcv_reconciled
+   - serving.pipeline_status
+   - serving.pipeline_execution_log
+
+   Postgres corre en UTC.
+   Los timestamp with time zone guardan instantes UTC.
+
+7. MINIO
+   Buckets:
+   - market-lake
+   - market-checkpoints
+   - market-quarantine
+
+   Prefijos:
+   - historical/
+   - batch-results/
+   - reference/
+
+   Usuarios de servicio:
+   - spark_service
+   - airflow_service
+   - api_service
+   Cada uno con permisos minimos.
+
+8. SERVING API
+   Archivos:
+   - api/main.py
+   - api/query_service.py
+   - api/exchange_client.py
+   - api/models.py
+   - api/tools.py
+   - api/sql_guardrails.py
+
+   Prioridad de datos:
+   1. serving.ohlcv_reconciled en Postgres.
+   2. Binance REST si no hay datos suficientes o estan viejos.
+   3. no_data_available si no hay fuente real.
+
+   Endpoints:
+   - /api/market/overview
+   - /api/market/ohlcv
+   - /api/market/metrics
+   - /api/market/orderbook
+   - /api/market/trades
+   - /api/market/pipeline
+   - /api/assets
+   - /api/chat
+   - /api/chat/stream
+   - /api/ai/status
+   - /api/rag/status
+
+   Campos:
+   - source
+   - data_source
+   - is_live
+   - fetched_at
+   - cutoff_time
+
+   Valores:
+   - serving.ohlcv_reconciled (Postgres)
+   - Binance Public REST
+   - no_data_available
+
+   FRESCURA:
+   La API valida antiguedad antes de servir Postgres:
+   - 1m: 120 s
+   - 5m: 600 s
+   - 15m: 1800 s
+   - 1h: 7200 s
+   - 4h: 28800 s
+   - 1d: 172800 s
+   Si la ultima vela esta vieja, usa Binance REST real.
+   No inventa datos.
+
+9. FRONTEND
+   Carpeta:
+   - frontend/
+
+   Next.js exportado estatico, servido por FastAPI en:
+   http://localhost:8000
+
+   Archivos:
+   - frontend/src/app/page.tsx
+   - frontend/src/components/dashboard/DashboardView.tsx
+   - frontend/src/components/dashboard/AssetCard.tsx
+   - frontend/src/components/dashboard/AssetDeepDive.tsx
+   - frontend/src/components/dashboard/StreamingChart.tsx
+   - frontend/src/components/chat/MessageItem.tsx
+   - frontend/src/components/chat/DataArtifact.tsx
+   - frontend/src/lib/mockData.ts
+   - frontend/src/lib/types.ts
+   - frontend/src/lib/utils.ts
+
+   Flujo dashboard:
+   - Cards usan fetchOverview() y Binance REST directo.
+   - Deep dive usa /api/market/ohlcv.
+   - Chart 1D tiene 100 velas diarias y scroll horizontal.
+   - Chat usa /api/chat.
+   - Si la respuesta trae chart, se muestra como DataArtifact.
+
+10. IA - ROUTER LOCAL + GROQ + RAG
+    Archivos:
+    - api/semantic_router.py
+    - api/llm_service.py
+    - api/rag_indexer.py
+    - api/tools.py
+    - metadata/
+
+    Flujo:
+    1. Mensaje entra a /api/chat.
+    2. Router semantico local con embeddings bge-m3 en Ollama.
+    3. Saludos, identidad, despedidas, agradecimientos y fuera de alcance
+       responden localmente, sin Groq.
+    4. Consulta analitica -> RAG -> Groq.
+    5. Groq puede invocar tools de solo lectura:
+       - get_catalog_metadata
+       - query_metrics
+       - query_timeseries
+    6. Tools consultan API/Postgres/Binance.
+    7. Respuesta se limpia de Markdown.
+    8. Si hubo velas, se agrega chart a la respuesta.
+    9. Frontend muestra texto limpio + grafico real.
+
+    RAG:
+    - api/rag_indexer.py indexa README, metadata/docs/, metadata/catalog.json
+      y metadata/glossary.json.
+    - TF-IDF local; ChromaDB opcional.
+    - POST /api/rag/reindex reconstruye el indice.
+    - Guardrail: si no hay contexto RAG y no es consulta analitica, no inventa.
+
+    Modelos:
+    - Embeddings: bge-m3 local en Ollama.
+    - Inferencia: Groq openai/gpt-oss-120b.
+    - La IA local NO se usa para responder; solo embeddings.
+
+11. GOBIERNO - ATLAS / OPENMETADATA
+    Archivos:
+    - metadata/atlas_glossary.json
+    - metadata/atlas_types_classifications.json
+    - metadata/import_atlas_governance.py
+    - metadata/catalog.json
+    - metadata/openmetadata/
+    - metadata/openlineage/
+
+    Importante:
+    - OpenMetadata y OpenSearch estan bajo el perfil metadata del compose.
+    - Atlas tiene compose separado: infra/docker-compose.atlas.yml.
+    - El catalogo y glosario tambien alimentan el RAG.
+
+12. CONVENCION DE TIEMPO
+    - Todo se almacena en UTC.
+    - 1D se muestra como fecha UTC (YYYY-MM-DD), porque la vela diaria
+      de Binance abre a las 00:00 UTC.
+    - Intervalos intradia (1m, 5m, 1h, 4h) se muestran en COT.
+    - Fecha de corte se muestra en UTC.
+    - No se usa una API externa de hora.
+    - Se usa el timestamp real del dato.
+
+13. ESTADO ACTUAL / CAVEATS
+    - 1D y 15m normalmente salen de serving.ohlcv_reconciled si estan frescas.
+    - 1m y 5m suelen salir de Binance REST porque el serving va atrasado.
+    - 1h puede salir de Binance si Postgres no tiene suficientes velas.
+    - Las cards de monedas usan Binance REST directo.
+    - El deep dive usa la API.
+    - Modulos marcados SIM (arbitraje, liquidaciones, on-chain, funding,
+      gas, Fear & Greed) son simulados y estan etiquetados.
+    - batch_recompute puede estar pausado.
+    - Para historial completo en Postgres:
+      1. ingest historical raw en historical/,
+      2. correr batch_recompute,
+      3. correr serving_reconcile.
+    - Hay 100 velas diarias backfilleadas para BTC/ETH/SOL/BNB
+      en serving.ohlcv_reconciled.
+    - Docker Desktop puede detenerse; si pasa, levantar Docker Desktop
+      y volver a ejecutar compose.
+
+14. LEVANTAR Y VERIFICAR
+    cd C:\Users\Freez\proyectos\lambda-crypto-platform
+    git checkout develop
+    git pull
+
+    docker compose -f infra/docker-compose.yml -p infra --env-file .env up -d --build
+
+    Verificar:
+    docker compose -f infra/docker-compose.yml -p infra ps
+    curl http://localhost:8000/api/health
+    curl http://localhost:8000/api/ai/status
+    curl "http://localhost:8000/api/market/ohlcv?symbol=BTCUSDT&interval=1d&limit=100"
+
+    URLs:
+    - Frontend/API: http://localhost:8000
+    - Swagger: http://localhost:8000/docs
+    - Airflow: http://localhost:8085
+    - Spark Master: http://localhost:8080
+    - MinIO: http://localhost:9001
+    - Ollama: http://localhost:11434
+
+15. TESTS
+    Backend:
+    python -m pytest -q tests/unit/test_semantic_router.py tests/unit/test_llm_service.py tests/unit/test_api.py tests/unit/test_tools.py tests/unit/test_rag_eval.py tests/unit/test_rag_indexer.py tests/unit/test_exchange_client.py tests/unit/test_market_rest_stream.py tests/integration/test_api.py tests/unit/test_security_hardening.py
+
+    Frontend:
+    cd frontend
+    npm run typecheck
+    npm run build
+
+16. RUTA DE ESTUDIO RECOMENDADA
+    Seguir UN evento:
+    1. ingestion/connectors/market_rest_stream.py -> market.events
+    2. infra/kafka/init-topics.sh -> topics
+    3. spark/streaming_market.py -> serving.realtime_metrics
+    4. spark/batch_historical.py -> batch-results
+    5. spark/serving_reconcile.py -> serving.ohlcv_reconciled
+    6. api/query_service.py -> Postgres vs Binance + frescura
+    7. api/main.py -> /api/market/ohlcv
+    8. frontend/src/lib/mockData.ts -> consumo API
+    9. frontend/src/components/dashboard/StreamingChart.tsx -> dibujo velas
+    10. api/semantic_router.py + api/llm_service.py -> chat
+    11. frontend/src/components/chat/DataArtifact.tsx -> chart del chat
+
+    Ese recorrido es el mapa completo:
+    extraccion -> contrato -> Kafka -> Speed/Batch -> MinIO/Postgres ->
+    API -> frontend -> IA.
+
+17. PRs RECIENTES
+    - #64: respuestas limpias, charts reales, RAG y cards grandes.
+    - #65: velas diarias en UTC y horas intradia en COT.
+    - #66: validacion de frescura OHLCV antes de servir Postgres.
+
+FIN DEL CONTEXTO
