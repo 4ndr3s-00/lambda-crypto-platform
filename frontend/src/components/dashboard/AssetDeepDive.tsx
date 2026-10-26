@@ -59,7 +59,7 @@ export function AssetDeepDive({ symbol, interval, onIntervalChange, onBack }: As
         const next = await marketApi.getOHLCV({ symbol, interval, limit: interval === "1d" ? 100 : 96 });
         if (cancelled) return;
         setSeries(next);
-        setSeriesError(next.isLive ? null : next.error ?? "datos simulados");
+        setSeriesError(next.isLive ? null : next.error ?? "sin datos");
         setLoading(false);
       } catch (error) {
         if (cancelled) return;
@@ -147,16 +147,6 @@ export function AssetDeepDive({ symbol, interval, onIntervalChange, onBack }: As
           <span className="font-mono text-[11px] font-medium tracking-wide text-zinc-200">
             {symbol} · WORKSPACE ANALÍTICO EN VIVO
           </span>
-          <span
-            className={cn(
-              "rounded-full border px-2 py-0.5 font-mono text-[9px]",
-              isLive
-                ? "border-emerald-500/25 text-emerald-400"
-                : "border-rose-500/25 text-rose-400",
-            )}
-          >
-            {isLive ? "LIVE" : "SIMULADO"}
-          </span>
           {candles.length > 0 && (
             <span className={cn("font-mono text-[9px]", up ? "text-emerald-400" : "text-rose-400")}>
               {formatPercent(returnPct)}
@@ -201,7 +191,7 @@ export function AssetDeepDive({ symbol, interval, onIntervalChange, onBack }: As
         </div>
         {seriesError && !isLive && (
           <div className="mb-2 rounded border border-rose-500/20 bg-rose-500/[0.06] px-2 py-1 font-mono text-[9px] text-rose-300">
-            Binance no respondió: {seriesError}. Se muestra el fallback simulado marcado.
+            Binance no respondió: {seriesError}. 
           </div>
         )}
         <div className="min-h-0 flex-1">
