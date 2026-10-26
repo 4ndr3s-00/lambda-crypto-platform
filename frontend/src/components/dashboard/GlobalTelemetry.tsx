@@ -27,12 +27,6 @@ export function GlobalTelemetry() {
   const fundingUp = data.fundingRate >= 0;
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 font-mono text-[10px] text-zinc-500">
-      <span
-        className="inline-flex items-center gap-1 rounded-full border border-amber-500/25 px-2 py-0.5 text-amber-400"
-        title="Todas las métricas de esta barra son simuladas; no provienen del pipeline Batch/Speed real."
-      >
-        SIMULADO
-      </span>
       <span className="inline-flex items-center gap-1.5">
         <span className={cn("inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current", latencyTone(data.latencyMs))} />
         <span className={latencyTone(data.latencyMs)}>{data.latencyMs}ms</span>
