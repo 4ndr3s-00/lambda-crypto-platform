@@ -84,3 +84,6 @@ frontend/out/
 
 frontend/*.tsbuildinfo
 
+
+# Built static slide deck
+frontend/slides-dist/
